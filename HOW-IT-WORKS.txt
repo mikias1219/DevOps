@@ -1,0 +1,368 @@
+================================================================================
+LOCAL DEVOPS — END TO END NOTE
+PC: Mikias local machine
+Date: 19 Aug 2026
+================================================================================
+
+This note describes HOW the current setup works, from first start to a GitHub
+push that rebuilds Collaboration frontend and backend.
+
+This is LOCAL DevOps on your PC (Docker + Jenkins).
+It is NOT GitHub Actions.
+It is NOT a GitHub webhook.
+Company app repos are never used as the DevOps repo.
+
+
+--------------------------------------------------------------------------------
+1. THE THREE REPOS (do not mix them)
+--------------------------------------------------------------------------------
+
+A) DevOps control plane (THIS repo)
+   GitHub:  https://github.com/mikias1219/DevOps
+   Disk:    /home/mikias/workspace/tools/docker-devops
+   Holds:   Jenkins jobs, docker-compose, start/stop scripts, Portainer
+   Does NOT hold: Collaboration app source
+
+B) Collaboration BACKEND (app)
+   GitHub:  git@github.com:IE-Network-Solutions/selamnew-collaboration-backend.git
+   Disk:    /home/mikias/workspace/company/SelamnewCollaboration/backend
+
+C) Collaboration FRONTEND (app)
+   GitHub:  https://github.com/IE-Network-Solutions/selamnew-collaboration-fe.git
+   Disk:    /home/mikias/workspace/company/SelamnewCollaboration/frontend
+
+Rule: app code stays in B and C. Docker/Jenkins stays in A.
+Do not commit this control plane into Collaboration develop.
+
+
+--------------------------------------------------------------------------------
+2. WHAT RUNS ON THIS PC
+--------------------------------------------------------------------------------
+
+Four Docker Compose projects. Jenkins does not run the apps inside Jenkins.
+Jenkins only tells host Docker to start / stop / recreate containers.
+
+  collaboration   frontend, backend, db, redis, elasticsearch, adminer
+  jenkins         jenkins (UI) + github-watch (no UI)
+  housekeeper     optional (personal project)
+  portainer       optional Docker UI
+
+Collaboration apps bind-mount source from disk.
+So a container recreate picks up the new git commit. No slow image rebuild
+for normal GitHub updates.
+
+CURRENT WATCHED BRANCHES (19 Aug 2026):
+  backend  = develop
+  frontend = develop
+
+These names live in:
+  /home/mikias/workspace/tools/docker-devops/collaboration/.env.docker
+
+    COLLABORATION_BACKEND_BRANCH=develop
+    COLLABORATION_FRONTEND_BRANCH=develop
+
+Jenkins watches ONLY those two names. A push to any other branch is ignored.
+
+
+--------------------------------------------------------------------------------
+3. INITIAL SETUP (once on this machine)
+--------------------------------------------------------------------------------
+
+Need:
+  - Docker Engine running
+  - GitHub SSH key at ~/.ssh/id_ed25519 that can READ the private app repos
+  - Backend and frontend already cloned on disk (paths above)
+  - DevOps repo cloned (already done):
+      /home/mikias/workspace/tools/docker-devops
+      remote = git@github.com:mikias1219/DevOps.git
+
+First-time commands (from the control plane):
+
+  cd /home/mikias/workspace/tools/docker-devops
+  chmod +x scripts/*.sh jenkins/*.sh jenkins/watch-github-loop.sh
+
+  cp collaboration/.env.docker.example collaboration/.env.docker
+  # already exists on this PC
+
+  ./scripts/sync-env-from-projects.sh
+  # copies backend/.env and frontend/.env into collaboration/env/
+  # those copies stay LOCAL (gitignored). never push them to DevOps GitHub.
+
+  ./scripts/start-collaboration.sh
+  docker compose -f jenkins/docker-compose.yml up -d
+  ./jenkins/sync-jobs.sh
+
+Jenkins login:  http://localhost:8080
+Typical local admin:  admin / DevOps@2026
+
+After this, containers should be up:
+  collaboration-frontend-1     http://localhost:3000
+  collaboration-backend-1      http://localhost:5000/api/v1
+  collaboration-db-1           host port 5434
+  collaboration-redis-1        host port 6381
+  collaboration-adminer-1      http://localhost:8083
+  jenkins                      http://localhost:8080
+  jenkins-github-watch-1       no UI (checker only)
+
+
+--------------------------------------------------------------------------------
+4. DAILY START (after reboot)
+--------------------------------------------------------------------------------
+
+  cd /home/mikias/workspace/tools/docker-devops
+  ./scripts/start-collaboration.sh
+  docker compose -f jenkins/docker-compose.yml up -d
+
+Open:
+  App UI     http://localhost:3000
+  API        http://localhost:5000/api/v1
+  Jenkins    http://localhost:8080
+  DB UI      http://localhost:8083
+             System PostgreSQL, server db, user postgres,
+             password collab_secret, database selamnew-collab
+
+Do NOT run npm run dev / npm start on the host for these apps.
+Docker already runs them.
+
+
+--------------------------------------------------------------------------------
+5. THE AUTOMATIC PATH (GitHub push -> running app)
+--------------------------------------------------------------------------------
+
+This is the main DevOps loop. There is NO GitHub webhook.
+
+Why no webhook:
+  Jenkins lives on localhost:8080.
+  GitHub cannot call your PC.
+  Instead, a small container POLLS GitHub every 30 seconds.
+
+Step by step:
+
+  1. A teammate (or you) pushes a commit to GitHub
+     on the WATCHED branch (today: develop)
+     in backend and/or frontend.
+
+  2. Container github-watch runs:
+       git ls-remote  (over SSH, using ~/.ssh/id_ed25519)
+     every 30 seconds, for each watched repo/branch.
+
+  3. It compares that remote SHA to a file in:
+       /home/mikias/workspace/tools/docker-devops/.watch-state/
+         collaboration-backend.sha
+         collaboration-frontend.sha
+
+     Same SHA  -> do nothing. Jenkins stays idle. Containers stay up.
+     New SHA   -> POST Jenkins job  watch-github
+
+  4. Jenkins job watch-github runs.
+     It checks again which repo actually moved, then starts ONLY
+     the matching job, with ACTION=update-from-github:
+
+       collaboration-backend
+       and/or
+       collaboration-frontend
+
+  5. That job:
+       - git fetch + fast-forward the folder on disk
+         (backend or frontend) onto the watched branch
+       - npm install inside a node container
+       - docker compose up -d --force-recreate that service
+       - smoke check (backend hits /api/v1/spaces)
+
+  6. The new code is now running in Docker.
+     Frontend: http://localhost:3000
+     Backend:  http://localhost:5000/api/v1
+
+If watch-github is idle, GitHub develop has not moved. That is normal.
+
+Check the watcher:
+
+  docker logs jenkins-github-watch-1 --tail 50
+
+
+--------------------------------------------------------------------------------
+6. WHAT HAPPENS IF YOU PUSH A DIFFERENT BRANCH
+--------------------------------------------------------------------------------
+
+Example: you push feature/foo or a sprint branch.
+
+Nothing happens.
+
+The watcher only asks GitHub:
+  "What is the SHA of develop?"   (or whatever is in .env.docker)
+
+It does not subscribe to the whole repo.
+
+To follow another branch, do NOT edit .env.docker by hand.
+Use Jenkins job:
+
+  http://localhost:8080/job/switch-watch-branch/
+
+  1. Build with Parameters
+  2. REPO = collaboration-backend  OR  collaboration-frontend
+            OR collaboration-both
+  3. REBUILD_NOW = checked  (pull + recreate now)
+  4. Build
+  5. Jenkins lists live GitHub branches and pauses
+  6. Pick BRANCH -> Proceed
+
+That job writes the new branch into .env.docker, checks it out on disk,
+resets the watcher SHA, and rebuilds if REBUILD_NOW is on.
+
+github-watch re-reads .env.docker every 30s, so it follows the new branch
+after that.
+
+Backend and frontend can watch DIFFERENT branches at the same time.
+
+
+--------------------------------------------------------------------------------
+7. MANUAL CONTROL (without waiting for GitHub)
+--------------------------------------------------------------------------------
+
+Jenkins UI: http://localhost:8080
+Open a job -> Build with Parameters -> ACTION:
+
+  start              start that container
+  stop               stop that container
+  restart            stop then start
+  build-and-start    recreate from current files on disk
+  update-from-github git pull watched branch, then recreate
+
+Jobs:
+  collaboration-stack       db + redis (+ ES) + backend + frontend
+  collaboration-backend     backend (+ db/redis when starting)
+  collaboration-frontend    frontend
+  watch-github              auto trigger only when SHA changes
+  switch-watch-branch       pick which GitHub branch to follow
+
+From the terminal:
+
+  cd /home/mikias/workspace/tools/docker-devops
+  ACTION=update-from-github ./jenkins/trigger-build.sh collaboration-backend
+  ACTION=update-from-github ./jenkins/trigger-build.sh collaboration-frontend
+
+
+--------------------------------------------------------------------------------
+8. SECRETS AND WHAT MUST NEVER GO TO GITHUB
+--------------------------------------------------------------------------------
+
+DevOps GitHub repo may contain:
+  compose files, Jenkinsfiles, job XML, scripts, README, examples
+
+Must stay on this PC only (gitignored):
+  collaboration/.env.docker
+  housekeeper/.env.docker
+  collaboration/env/backend.env     (copied from backend/.env)
+  collaboration/env/frontend.env    (copied from frontend/.env)
+  .watch-state/                     (last seen GitHub SHAs)
+
+Also never commit:
+  SSH private keys
+  Jenkins volume data
+  real Firebase / Stripe / private keys
+
+After clone on a new machine:
+
+  cp collaboration/.env.docker.example collaboration/.env.docker
+  ./scripts/sync-env-from-projects.sh
+
+
+--------------------------------------------------------------------------------
+9. URLS AND PORTS (Collaboration + Jenkins)
+--------------------------------------------------------------------------------
+
+  Collaboration app     http://localhost:3000
+  Collaboration API     http://localhost:5000/api/v1
+  Jenkins               http://localhost:8080
+  Collaboration Adminer http://localhost:8083
+  Portainer (optional)  https://localhost:9443
+
+  Frontend host 3000  (container 3001)
+  Backend  5000
+  Postgres 5434
+  Redis    6381
+  Adminer  8083
+  Jenkins  8080
+  ES       9200
+
+Do not run host Next AND collaboration-frontend-1 together (both want 3000).
+Do not run host Nest AND collaboration-backend-1 together (both want 5000).
+
+
+--------------------------------------------------------------------------------
+10. PICTURE OF THE WHOLE PATH
+--------------------------------------------------------------------------------
+
+  You / teammate
+       |
+       |  git push  (watched branch only, today = develop)
+       v
+  GitHub app repos
+    selamnew-collaboration-backend
+    selamnew-collaboration-fe
+       |
+       |  every 30s: git ls-remote over SSH
+       v
+  docker container: github-watch
+       |
+       |  SHA unchanged -> stop here
+       |  SHA changed   -> trigger Jenkins
+       v
+  Jenkins job: watch-github
+       |
+       |  only the repo that moved
+       v
+  Jenkins job: collaboration-backend
+           and/or collaboration-frontend
+           ACTION=update-from-github
+       |
+       |  git pull on disk
+       |  npm install
+       |  docker compose recreate
+       v
+  Host Docker
+       |
+       v
+  Running containers
+    localhost:3000   frontend
+    localhost:5000   backend
+
+
+--------------------------------------------------------------------------------
+11. HOW TO TELL WHAT IS WRONG
+--------------------------------------------------------------------------------
+
+  Want to see which branch is watched
+    open collaboration/.env.docker
+    or run Jenkins job switch-watch-branch (it prints "Currently watching")
+
+  Want to see which branch is on disk
+    git -C .../backend branch --show-current
+    git -C .../frontend branch --show-current
+
+  Push happened but nothing rebuilt
+    1. Was the push on the watched branch?
+    2. docker logs jenkins-github-watch-1
+    3. Jenkins -> watch-github  (idle = SHA did not change)
+    4. SSH key can still read the private GitHub repos?
+
+  Containers down
+    ./scripts/start-collaboration.sh
+    docker compose -f jenkins/docker-compose.yml up -d
+
+
+--------------------------------------------------------------------------------
+12. WHAT THIS SETUP IS NOT
+--------------------------------------------------------------------------------
+
+  - Not a GitHub webhook (GitHub cannot reach localhost Jenkins)
+  - Not GitHub Actions
+  - Not a production cloud CI
+  - Not one mega-repo for app + DevOps
+  - DevOps GitHub (mikias1219/DevOps) does not rebuild the app when YOU
+    push THIS control plane. Only the APP remotes (backend/frontend)
+    are watched.
+
+================================================================================
+END OF NOTE
+================================================================================
