@@ -1,0 +1,103 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@1540.v295eccc9778c">
+  <actions/>
+  <description>Collaboration backend ? control backend container (+ infra when starting)</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>ACTION</name>
+          <description>Container control</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>start</string>
+              <string>stop</string>
+              <string>restart</string>
+              <string>build-and-start</string>
+              <string>update-from-github</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    COMPOSE_FILE = '/var/devops/collaboration/docker-compose.yml'
+    ENV_FILE = '/var/devops/collaboration/.env.docker'
+    SERVICE = 'backend'
+  }
+
+  stages {
+    stage('Control backend') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . /var/devops/jenkins/docker-lib.sh
+          SOURCE="$(grep '^COLLABORATION_SOURCE=' "$ENV_FILE" | cut -d= -f2-)"
+          BRANCH="$(grep '^COLLABORATION_BACKEND_BRANCH=' "$ENV_FILE" | cut -d= -f2- || echo develop)"
+          echo "ACTION=${ACTION}"
+          case "${ACTION}" in
+            start)
+              ensure_npm_packages "$SOURCE/backend"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d db redis "$SERVICE"
+              ;;
+            stop)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE"
+              ;;
+            restart)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE" || true
+              ensure_npm_packages "$SOURCE/backend"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d db redis "$SERVICE"
+              ;;
+            build-and-start|update-from-github)
+              if [ "${ACTION}" = "update-from-github" ]; then
+                git_pull_repo "$SOURCE/backend" "$BRANCH"
+              fi
+              install_npm_packages "$SOURCE/backend"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d db redis
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate "$SERVICE"
+              ;;
+            *) echo "Unknown ACTION: ${ACTION}" &gt;&amp;2; exit 1 ;;
+          esac
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps "$SERVICE" db redis
+        '''
+      }
+    }
+
+    stage('Smoke') {
+      when { expression { return params.ACTION != 'stop' } }
+      steps {
+        sh '''
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T "$SERVICE" \
+              node -e "require('http').get('http://127.0.0.1:5000/api/v1/spaces',r=&gt;process.exit(r.statusCode&gt;0?0:1)).on('error',()=&gt;process.exit(1))" 2&gt;/dev/null; then
+              echo "collaboration backend healthy"; exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+        '''
+      }
+    }
+  }
+}
+</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>

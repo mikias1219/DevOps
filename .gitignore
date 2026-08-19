@@ -1,0 +1,14 @@
+.watch-state/
+
+# Local machine env (copy from *.example)
+.env
+**/.env
+**/.env.docker
+!**/.env.docker.example
+
+# Copied app secrets — never commit (Firebase keys, Stripe, private keys)
+collaboration/env/*.env
+
+.DS_Store
+*.swp
+*~

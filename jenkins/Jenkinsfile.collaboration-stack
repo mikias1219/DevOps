@@ -1,0 +1,57 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    COMPOSE_FILE = '/var/devops/collaboration/docker-compose.yml'
+    ENV_FILE = '/var/devops/collaboration/.env.docker'
+  }
+
+  stages {
+    stage('Collaboration stack') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . /var/devops/jenkins/docker-lib.sh
+          SOURCE="$(grep '^COLLABORATION_SOURCE=' "$ENV_FILE" | cut -d= -f2-)"
+          BACK_BRANCH="$(grep '^COLLABORATION_BACKEND_BRANCH=' "$ENV_FILE" | cut -d= -f2- || echo develop)"
+          FE_BRANCH="$(grep '^COLLABORATION_FRONTEND_BRANCH=' "$ENV_FILE" | cut -d= -f2- || echo develop)"
+          echo "ACTION=${ACTION}"
+          case "${ACTION}" in
+            start)
+              ensure_npm_packages "$SOURCE/backend"
+              ensure_npm_packages "$SOURCE/frontend"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+              ;;
+            stop)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop
+              ;;
+            restart)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop || true
+              ensure_npm_packages "$SOURCE/backend"
+              ensure_npm_packages "$SOURCE/frontend"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+              ;;
+            build-and-start|update-from-github)
+              if [ "${ACTION}" = "update-from-github" ]; then
+                git_pull_repo "$SOURCE/backend" "$BACK_BRANCH"
+                git_pull_repo "$SOURCE/frontend" "$FE_BRANCH"
+              fi
+              install_npm_packages "$SOURCE/backend"
+              install_npm_packages "$SOURCE/frontend"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate
+              ;;
+            *) echo "Unknown ACTION: ${ACTION}" >&2; exit 1 ;;
+          esac
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+        '''
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    DEVOPS_DIR = '/var/devops'
+    COMPOSE_FILE = '/var/devops/housekeeper/docker-compose.yml'
+    ENV_FILE = '/var/devops/housekeeper/.env.docker'
+    IMAGE = 'housekeeper-api'
+    SERVICE = 'api'
+  }
+
+  stages {
+    stage('Control backend') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . "$DEVOPS_DIR/jenkins/docker-lib.sh"
+          SOURCE="$(grep '^HOUSEKEEPER_SOURCE=' "$ENV_FILE" | cut -d= -f2-)"
+          BRANCH="$(grep '^HOUSEKEEPER_BACKEND_BRANCH=' "$ENV_FILE" | cut -d= -f2- || echo main)"
+          echo "ACTION=${ACTION}"
+          case "${ACTION}" in
+            start)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d postgres redis "$SERVICE"
+              ;;
+            stop)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE"
+              ;;
+            restart)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE" || true
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d postgres redis "$SERVICE"
+              ;;
+            build-and-start|update-from-github)
+              if [ "${ACTION}" = "update-from-github" ]; then
+                git_pull_repo "$SOURCE/backend" "$BRANCH"
+              fi
+              if [ "${SKIP_TESTS}" = "false" ]; then
+                docker run --rm -v "$SOURCE/backend:/app" -w /app node:20-bookworm-slim \
+                  bash -lc 'npm ci && npm test -- --passWithNoTests'
+              fi
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache "$SERVICE"
+              docker tag "${IMAGE}:local" "${IMAGE}:jenkins"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d postgres redis
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate "$SERVICE"
+              ;;
+            *) echo "Unknown ACTION: ${ACTION}" >&2; exit 1 ;;
+          esac
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps "$SERVICE" postgres redis
+        '''
+      }
+    }
+
+    stage('Smoke') {
+      when { expression { return params.ACTION != 'stop' } }
+      steps {
+        sh '''
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T "$SERVICE" \
+              curl -fsS http://127.0.0.1:4000/api/v1/health >/dev/null 2>&1; then
+              echo "housekeeper backend healthy"; exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+        '''
+      }
+    }
+  }
+}

@@ -1,0 +1,135 @@
+# Housekeeper project — Postgres, Redis, API, Web
+# Usage:
+#   cp .env.docker.example .env.docker
+#   docker compose --env-file .env.docker up -d --build
+
+name: housekeeper
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-housekeeper}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-housekeeper_secret}
+      POSTGRES_DB: ${DATABASE_NAME:-housekeeper}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - housekeeper_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DATABASE_USER:-housekeeper} -d ${DATABASE_NAME:-housekeeper}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    volumes:
+      - housekeeper_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ${HOUSEKEEPER_SOURCE}/backend
+      dockerfile: Dockerfile
+    image: housekeeper-api:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 4000
+      API_PREFIX: api/v1
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DATABASE_USER:-housekeeper}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-housekeeper_secret}
+      DATABASE_NAME: ${DATABASE_NAME:-housekeeper}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-long-random-string}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      SEED_ON_START: ${SEED_ON_START:-true}
+      SEED_TEST_DATA: ${SEED_TEST_DATA:-true}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@gmail.com}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-Miki@1219}
+      PLATFORM_ADMIN_NAME: ${PLATFORM_ADMIN_NAME:-Platform Admin}
+      SEED_EMPLOYER_EMAIL: ${SEED_EMPLOYER_EMAIL:-employer@gmail.com}
+      SEED_EMPLOYER_PASSWORD: ${SEED_EMPLOYER_PASSWORD:-Miki@1219}
+      SEED_EMPLOYER_NAME: ${SEED_EMPLOYER_NAME:-Demo Employer}
+      SEED_HOUSEKEEPER_EMAIL: ${SEED_HOUSEKEEPER_EMAIL:-housekeeper@gmail.com}
+      SEED_HOUSEKEEPER_PASSWORD: ${SEED_HOUSEKEEPER_PASSWORD:-Miki@1219}
+      SEED_HOUSEKEEPER_NAME: ${SEED_HOUSEKEEPER_NAME:-Demo Housekeeper}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/settings/google-callback}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Housekeeper <onboarding@resend.dev>}
+      SMS_ENABLED: ${SMS_ENABLED:-false}
+      SMS_PROVIDER: ${SMS_PROVIDER:-console}
+    ports:
+      - "${API_HOST_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+
+  web:
+    build:
+      context: ${HOUSEKEEPER_SOURCE}/frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/api/v1}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:4000}
+    image: housekeeper-web:local
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${WEB_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  adminer:
+    image: adminer:4
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha
+    ports:
+      - "${ADMINER_HOST_PORT:-8082}:8080"
+
+volumes:
+  housekeeper_pgdata:
+  housekeeper_redis:

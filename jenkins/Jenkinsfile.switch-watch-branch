@@ -1,0 +1,99 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  parameters {
+    choice(
+      name: 'REPO',
+      choices: [
+        'collaboration-backend',
+        'collaboration-frontend',
+        'collaboration-both',
+        'housekeeper-backend',
+        'housekeeper-frontend',
+        'housekeeper-both',
+      ],
+      description: 'Which GitHub repo the watcher should follow',
+    )
+    booleanParam(
+      name: 'REBUILD_NOW',
+      defaultValue: true,
+      description: 'After switching, pull that branch and recreate the container',
+    )
+  }
+
+  stages {
+    stage('List GitHub branches') {
+      steps {
+        script {
+          def listed = sh(
+            script: """#!/usr/bin/env bash
+              set -euo pipefail
+              . /var/devops/jenkins/docker-lib.sh
+              echo "CURRENT=\$(current_watch_branch '${params.REPO}')"
+              echo "DIR=\$(target_source_dir '${params.REPO}')"
+              list_github_branches "\$(target_source_dir '${params.REPO}')"
+            """,
+            returnStdout: true,
+          ).trim()
+
+          def lines = listed.readLines().collect { it.trim() }.findAll { it }
+          def current = ''
+          def branches = []
+          lines.each { line ->
+            if (line.startsWith('CURRENT=')) {
+              current = line.substring('CURRENT='.length())
+            } else if (line.startsWith('DIR=')) {
+              echo "Repo path: ${line.substring('DIR='.length())}"
+            } else {
+              branches << line
+            }
+          }
+
+          if (branches.isEmpty()) {
+            error "No GitHub branches found for ${params.REPO}"
+          }
+
+          if (current && branches.contains(current)) {
+            branches.remove(current)
+            branches.add(0, current)
+          }
+
+          echo "Currently watching: ${current ?: '(none)'}"
+          echo "Select a branch in the Jenkins input form (Paused for input)."
+
+          timeout(time: 30, unit: 'MINUTES') {
+            def chosen = input(
+              id: 'PickBranch',
+              message: "Watch which GitHub branch for ${params.REPO}?",
+              parameters: [
+                choice(
+                  name: 'BRANCH',
+                  choices: branches,
+                  description: "Remote branches (current watch is first if present): ${current}",
+                )
+              ],
+            )
+            env.SELECTED_BRANCH = (chosen instanceof Map) ? chosen.BRANCH : chosen
+          }
+        }
+      }
+    }
+
+    stage('Switch watch + rebuild') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/docker-lib.sh
+          echo "REPO=${REPO} BRANCH=${SELECTED_BRANCH} REBUILD_NOW=${REBUILD_NOW}"
+          switch_watch_target "${REPO}" "${SELECTED_BRANCH}" "${REBUILD_NOW}"
+        '''
+      }
+    }
+  }
+}

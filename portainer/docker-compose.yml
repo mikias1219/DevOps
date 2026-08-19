@@ -1,0 +1,20 @@
+# Portainer CE — Docker management UI
+# Usage: docker compose up -d
+# UI:    https://localhost:9443  (or http://localhost:8000)
+
+name: portainer
+
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+volumes:
+  portainer_data:

@@ -1,0 +1,107 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@1540.v295eccc9778c">
+  <actions/>
+  <description>Housekeeper frontend ? control web container</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>ACTION</name>
+          <description>Container control</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>start</string>
+              <string>stop</string>
+              <string>restart</string>
+              <string>build-and-start</string>
+              <string>update-from-github</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>SKIP_TESTS</name>
+          <description>Skip unit tests (build-and-start only)</description>
+          <defaultValue>true</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    DEVOPS_DIR = '/var/devops'
+    COMPOSE_FILE = '/var/devops/housekeeper/docker-compose.yml'
+    ENV_FILE = '/var/devops/housekeeper/.env.docker'
+    IMAGE = 'housekeeper-web'
+    SERVICE = 'web'
+  }
+
+  stages {
+    stage('Control frontend') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . "$DEVOPS_DIR/jenkins/docker-lib.sh"
+          SOURCE="$(grep '^HOUSEKEEPER_SOURCE=' "$ENV_FILE" | cut -d= -f2-)"
+          BRANCH="$(grep '^HOUSEKEEPER_FRONTEND_BRANCH=' "$ENV_FILE" | cut -d= -f2- || echo main)"
+          echo "ACTION=${ACTION}"
+          case "${ACTION}" in
+            start)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$SERVICE"
+              ;;
+            stop)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE"
+              ;;
+            restart)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE" || true
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$SERVICE"
+              ;;
+            build-and-start|update-from-github)
+              if [ "${ACTION}" = "update-from-github" ]; then
+                git_pull_repo "$SOURCE/frontend" "$BRANCH"
+              fi
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache "$SERVICE"
+              docker tag "${IMAGE}:local" "${IMAGE}:jenkins"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate "$SERVICE"
+              ;;
+            *) echo "Unknown ACTION: ${ACTION}" &gt;&amp;2; exit 1 ;;
+          esac
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps "$SERVICE"
+        '''
+      }
+    }
+
+    stage('Smoke') {
+      when { expression { return params.ACTION != 'stop' } }
+      steps {
+        sh '''
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T "$SERVICE" \
+              curl -fsS -o /dev/null http://127.0.0.1:3000/; then
+              echo "housekeeper frontend healthy"; exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+        '''
+      }
+    }
+  }
+}
+</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
