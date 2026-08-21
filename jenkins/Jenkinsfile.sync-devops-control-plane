@@ -34,7 +34,6 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          # shellcheck source=/dev/null
           . /var/devops/jenkins/docker-lib.sh
 
           ROOT="${DEVOPS_ROOT}"
@@ -49,7 +48,6 @@ pipeline {
           if [ -n "${dirty}" ]; then
             echo "FATAL: DevOps working tree has local tracked modifications:" >&2
             echo "${dirty}" >&2
-            echo "Commit/push from laptop or stash on server, then re-run." >&2
             exit 1
           fi
 
@@ -67,14 +65,19 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export JENKINS_URL="${JENKINS_URL_INTERNAL}"
+          # Jenkins LTS image has no python3 — run sync-jobs in a short-lived container.
           if [ -f /var/devops/jenkins/secrets/admin.env ]; then
             set -a
-            # shellcheck disable=SC1091
             . /var/devops/jenkins/secrets/admin.env
             set +a
           fi
-          /var/devops/jenkins/sync-jobs.sh
+          docker run --rm --network host \
+            -v /var/devops:/var/devops:rw \
+            -e JENKINS_URL=http://127.0.0.1:8080 \
+            -e JENKINS_ADMIN_USER="${JENKINS_ADMIN_USER:-admin}" \
+            -e JENKINS_ADMIN_PASS="${JENKINS_ADMIN_PASS:-}" \
+            python:3.12-bookworm \
+            bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null && bash /var/devops/jenkins/sync-jobs.sh'
         '''
       }
     }
