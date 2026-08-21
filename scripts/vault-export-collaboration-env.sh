@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Export Vault KV → collaboration/env/{backend,frontend}.env (chmod 600).
 # TARGET=both|backend|frontend (default both)
-# Works inside Jenkins (no python3) via secrets-room node or python container.
+# Jenkins has no python3 — uses secrets-room Node, then python container.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -60,14 +60,25 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
   exit 1
 fi
 
-# Map /var/devops/... (Jenkins view) → host path for docker -v
+# Path as seen inside Jenkins/secrets-room (/var/devops/...)
+to_container_devops_path() {
+  local p="$1"
+  if [[ "$p" == /var/devops/* ]]; then
+    printf '%s\n' "$p"
+  elif [[ "$p" == "$DEVOPS_HOST_PATH"/* ]]; then
+    printf '/var/devops%s\n' "${p#"$DEVOPS_HOST_PATH"}"
+  elif [[ "$p" == "$ROOT"/* && "$ROOT" != /var/devops ]]; then
+    # ROOT is host checkout path
+    printf '/var/devops%s\n' "${p#"$ROOT"}"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
 to_host_path() {
   local p="$1"
   if [[ "$p" == /var/devops/* ]]; then
     printf '%s%s\n' "$DEVOPS_HOST_PATH" "${p#/var/devops}"
-  elif [[ "$p" == "$ROOT"/* ]]; then
-    # ROOT may already be host path when run on host
-    printf '%s\n' "$p"
   else
     printf '%s\n' "$p"
   fi
@@ -76,10 +87,12 @@ to_host_path() {
 write_env_from_json() {
   local out_file="$1"
   local json="$2"
-  local host_out
-  host_out="$(to_host_path "$out_file")"
-  umask 077
-  mkdir -p "$(dirname "$host_out")"
+  local c_out host_out
+  c_out="$(to_container_devops_path "$out_file")"
+  host_out="$(to_host_path "$c_out")"
+
+  # Ensure dir exists in *this* filesystem (Jenkins bind-mounts /var/devops)
+  mkdir -p "$(dirname "$out_file")"
 
   local py_script='
 import json, os, sys
@@ -100,14 +113,10 @@ print(f"  wrote {len(lines)} keys")
 '
 
   if command -v python3 >/dev/null 2>&1; then
-    OUT_FILE="$host_out" python3 -c "$py_script" <<<"$json"
+    OUT_FILE="$out_file" python3 -c "$py_script" <<<"$json"
   elif docker ps --format '{{.Names}}' 2>/dev/null | grep -qx selamnew-secrets-room; then
-    # secrets-room has node + /var/devops bind-mount
-    local room_out="$out_file"
-    if [[ "$out_file" != /var/devops/* && "$host_out" == "$DEVOPS_HOST_PATH"/* ]]; then
-      room_out="/var/devops${host_out#"$DEVOPS_HOST_PATH"}"
-    fi
-    printf '%s' "$json" | docker exec -i -e OUT_FILE="$room_out" selamnew-secrets-room \
+    # secrets-room mounts ..:/var/devops — write there, never mkdir host paths from Jenkins
+    printf '%s' "$json" | docker exec -i -e OUT_FILE="$c_out" selamnew-secrets-room \
       node -e '
 const fs = require("fs");
 let raw = "";
@@ -119,6 +128,7 @@ process.stdin.on("end", () => {
     .filter((k) => k !== "_seed")
     .sort()
     .map((k) => k + "=" + (payload[k] == null ? "" : String(payload[k])));
+  fs.mkdirSync(require("path").dirname(process.env.OUT_FILE), { recursive: true });
   fs.writeFileSync(process.env.OUT_FILE, lines.join("\n") + (lines.length ? "\n" : ""));
   console.log("  wrote " + lines.length + " keys");
 });
@@ -131,11 +141,7 @@ process.stdin.on("end", () => {
       python3 -c "$py_script"
   fi
 
-  chmod 600 "$host_out"
-  # Also chmod container path if different and present
-  if [[ -f "$out_file" && "$out_file" != "$host_out" ]]; then
-    chmod 600 "$out_file" || true
-  fi
+  chmod 600 "$out_file" 2>/dev/null || true
 }
 
 export_path() {
