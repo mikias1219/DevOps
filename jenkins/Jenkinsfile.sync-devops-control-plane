@@ -10,6 +10,8 @@ pipeline {
   environment {
     DEVOPS_ROOT = '/var/devops'
     DEVOPS_BRANCH = 'main'
+    // Host path for docker -v (inside Jenkins, /var/devops is a container mount)
+    DEVOPS_HOST_PATH = '/home/ienetworks/workspace/tools/docker-devops'
     JENKINS_URL_INTERNAL = 'http://127.0.0.1:8080'
   }
 
@@ -65,14 +67,14 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          # Jenkins LTS image has no python3 — run sync-jobs in a short-lived container.
           if [ -f /var/devops/jenkins/secrets/admin.env ]; then
             set -a
             . /var/devops/jenkins/secrets/admin.env
             set +a
           fi
+          # Mount the HOST devops path (not /var/devops — that path does not exist on the host)
           docker run --rm --network host \
-            -v /var/devops:/var/devops:rw \
+            -v "${DEVOPS_HOST_PATH}:/var/devops:rw" \
             -e JENKINS_URL=http://127.0.0.1:8080 \
             -e JENKINS_ADMIN_USER="${JENKINS_ADMIN_USER:-admin}" \
             -e JENKINS_ADMIN_PASS="${JENKINS_ADMIN_PASS:-}" \
@@ -87,10 +89,9 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          ROOT="${DEVOPS_ROOT}"
-          if [ -f "${ROOT}/jenkins/docker-compose.yml" ]; then
+          if [ -f "${DEVOPS_HOST_PATH}/jenkins/docker-compose.yml" ]; then
             echo "==> Ensuring jenkins compose stack is up"
-            docker compose -f "${ROOT}/jenkins/docker-compose.yml" up -d
+            docker compose -f "${DEVOPS_HOST_PATH}/jenkins/docker-compose.yml" up -d
           fi
         '''
       }
