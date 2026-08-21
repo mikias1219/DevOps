@@ -26,11 +26,16 @@ to_github_ssh_url() {
 }
 
 # Always npm install into a bind-mounted app dir (used before Jenkins build/update).
+# Skips when node_modules already present — remove node_modules to force reinstall.
 install_npm_packages() {
   dir="$1"
   if [ ! -f "$dir/package.json" ]; then
     echo "No package.json in $dir" >&2
     return 1
+  fi
+  if [ -d "$dir/node_modules" ]; then
+    echo "==> node_modules present in $dir — skip apt/npm (delete node_modules to force reinstall)"
+    return 0
   fi
   echo "==> npm install in $dir"
   docker run --rm \

@@ -14,6 +14,22 @@ This folder is the **control plane**. App source stays in the backend/frontend r
 
 ---
 
+## Server DevOps + Vault Room
+
+On the Ubuntu server (`172.16.50.39`), this repo is the **live** control plane:
+
+| Piece | URL / path |
+|-------|------------|
+| Push DevOps → sync Jenkins | job `sync-devops-control-plane` |
+| Vault UI | http://SERVER:8200/ui |
+| Secrets Room | http://SERVER:8300/ |
+| Apply secrets | job `apply-vault-env` |
+
+First-time: `./scripts/bootstrap-server-vault-room.sh`  
+Details: `HOW-IT-WORKS.txt` sections 13–15. Nginx: `nginx/selamnew-vault-secrets.conf`
+
+---
+
 ## How the pieces talk (end to end)
 
 Nothing rebuilds on a Jenkins timer. A quiet checker looks at GitHub. Jenkins only starts a job when a branch SHA actually changes. That job pulls the repo on disk and recreates the matching container.

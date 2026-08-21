@@ -1,0 +1,26 @@
+# Secrets Room UI — Vault-backed env manager for Collaboration FE/BE
+name: secrets-room
+
+services:
+  secrets-room:
+    build: .
+    image: selamnew-secrets-room:local
+    container_name: selamnew-secrets-room
+    restart: unless-stopped
+    ports:
+      - "8300:8300"
+    env_file:
+      - ./.env
+    environment:
+      PORT: "8300"
+      VAULT_ADDR: "${VAULT_ADDR:-http://172.16.50.39:8200}"
+      DEVOPS_ROOT: /var/devops
+      COLLABORATION_SOURCE: "${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}"
+    volumes:
+      - ..:/var/devops:rw
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}:${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}:ro
+    group_add:
+      - "${DOCKER_GID:-124}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

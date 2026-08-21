@@ -1,8 +1,7 @@
 # Collaboration — backend + frontend in Docker (bind-mount source; packages stay in the container volume).
-# Elasticsearch is optional and not started for this lightweight run.
 #
 # Ports:
-#   frontend host 3000 (container 3001) | backend 5000 | postgres 5434 | redis 6381
+#   frontend host 3000 (container 3001) | backend 5000 | postgres 5434 | redis 6381 | ES 9200
 
 name: collaboration
 
@@ -42,6 +41,30 @@ services:
       timeout: 3s
       retries: 20
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      cluster.name: collaboration-dev
+    ports:
+      - "127.0.0.1:${ELASTICSEARCH_HOST_PORT:-9200}:9200"
+    volumes:
+      - collaboration_esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
   backend:
     image: node:20-bookworm-slim
     restart: unless-stopped
@@ -50,6 +73,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     env_file:
       - ./env/backend.env
@@ -62,12 +87,17 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-collab_secret}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      ELASTICSEARCH_NODE: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: ""
+      ELASTICSEARCH_PASSWORD: ""
       COLLABORATION_FRONT_URL: http://localhost:3000
     command:
       [
         "sh",
         "-c",
-        "if [ ! -d node_modules ]; then echo '==> node_modules missing — npm install'; npm install --no-audit --no-fund --legacy-peer-deps; else echo '==> node_modules present — skip npm install'; fi; npm run start:dev",
+        "if [ ! -d node_modules ]; then echo '==> node_modules missing — npm install'; npm install --no-audit --no-fund --legacy-peer-deps; else echo '==> node_modules present — skip npm install'; fi; \
+         node -e \"require.resolve('webpack')\" >/dev/null 2>&1 || (echo '==> webpack missing — installing webpack'; npm install --no-audit --no-fund --legacy-peer-deps webpack webpack-cli); \
+         npm run start:dev",
       ]
     volumes:
       - ${COLLABORATION_SOURCE}/backend:/app
@@ -139,4 +169,5 @@ services:
 volumes:
   collaboration_pgdata:
   collaboration_redis:
+  collaboration_esdata:
   collaboration_frontend_next:

@@ -1,0 +1,105 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '40'))
+  }
+
+  environment {
+    DEVOPS_ROOT = '/var/devops'
+    DEVOPS_BRANCH = 'main'
+    JENKINS_URL_INTERNAL = 'http://127.0.0.1:8080'
+  }
+
+  stages {
+    stage('Decide') {
+      steps {
+        script {
+          def ref = env.gh_ref ?: ''
+          echo "Webhook gh_ref=${ref}"
+          if (ref && !(ref in ['refs/heads/main', 'refs/heads/master'])) {
+            echo "Ignoring push to ${ref} (only main/master sync the control plane)"
+            env.SKIP_SYNC = 'true'
+          } else {
+            env.SKIP_SYNC = 'false'
+          }
+        }
+      }
+    }
+
+    stage('Pull DevOps control plane') {
+      when { expression { return env.SKIP_SYNC != 'true' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . /var/devops/jenkins/docker-lib.sh
+
+          ROOT="${DEVOPS_ROOT}"
+          BRANCH="${DEVOPS_BRANCH}"
+
+          if [ ! -d "${ROOT}/.git" ]; then
+            echo "FATAL: ${ROOT} is not a git checkout of the DevOps repo" >&2
+            exit 1
+          fi
+
+          dirty="$(git -C "${ROOT}" status --porcelain --untracked-files=no | grep -vE '^\\?\\?' || true)"
+          if [ -n "${dirty}" ]; then
+            echo "FATAL: DevOps working tree has local tracked modifications:" >&2
+            echo "${dirty}" >&2
+            echo "Commit/push from laptop or stash on server, then re-run." >&2
+            exit 1
+          fi
+
+          BEFORE="$(git -C "${ROOT}" rev-parse HEAD)"
+          git_pull_repo "${ROOT}" "${BRANCH}"
+          AFTER="$(git -C "${ROOT}" rev-parse HEAD)"
+          echo "DevOps ${BEFORE} -> ${AFTER}"
+          git -C "${ROOT}" log -1 --oneline
+        '''
+      }
+    }
+
+    stage('Sync Jenkins jobs from Jenkinsfiles') {
+      when { expression { return env.SKIP_SYNC != 'true' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          export JENKINS_URL="${JENKINS_URL_INTERNAL}"
+          if [ -f /var/devops/jenkins/secrets/admin.env ]; then
+            set -a
+            # shellcheck disable=SC1091
+            . /var/devops/jenkins/secrets/admin.env
+            set +a
+          fi
+          /var/devops/jenkins/sync-jobs.sh
+        '''
+      }
+    }
+
+    stage('Refresh Jenkins compose if needed') {
+      when { expression { return env.SKIP_SYNC != 'true' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          ROOT="${DEVOPS_ROOT}"
+          if [ -f "${ROOT}/jenkins/docker-compose.yml" ]; then
+            echo "==> Ensuring jenkins compose stack is up"
+            docker compose -f "${ROOT}/jenkins/docker-compose.yml" up -d
+          fi
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo 'Done (sync ran or intentionally skipped for non-main branch).'
+    }
+    failure {
+      echo 'Sync failed — check Console Output. Do not scp Jenkinsfiles; fix git state and re-run.'
+    }
+  }
+}

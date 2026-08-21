@@ -352,17 +352,82 @@ Do not run host Nest AND collaboration-backend-1 together (both want 5000).
 
 
 --------------------------------------------------------------------------------
-12. WHAT THIS SETUP IS NOT
+12. WHAT THIS SETUP IS NOT (laptop-only caveats)
 --------------------------------------------------------------------------------
 
-  - Not a GitHub webhook (GitHub cannot reach localhost Jenkins)
   - Not GitHub Actions
-  - Not a production cloud CI
+  - Not a production multi-node HA cluster
   - Not one mega-repo for app + DevOps
-  - DevOps GitHub (mikias1219/DevOps) does not rebuild the app when YOU
-    push THIS control plane. Only the APP remotes (backend/frontend)
-    are watched.
+
+On the Ubuntu SERVER, GitHub webhooks DO reach Jenkins (Tailscale Funnel / LAN
+Nginx). See sections 13–15.
+
+
+--------------------------------------------------------------------------------
+13. SERVER MODE — DevOps push updates Jenkins
+--------------------------------------------------------------------------------
+
+Source of truth: GitHub https://github.com/mikias1219/DevOps
+Server clone:    ~/workspace/tools/docker-devops  (bind-mounted as /var/devops)
+
+Laptop workflow (do NOT scp Jenkinsfiles):
+  1. Edit Jenkinsfiles / compose / scripts locally
+  2. git push origin main
+  3. GitHub webhook → Jenkins job sync-devops-control-plane
+  4. Job: git pull /var/devops + ./jenkins/sync-jobs.sh
+
+Webhook URL (token in jenkins/secrets/github-webhook-token.txt):
+  https://<funnel-or-host>/generic-webhook-trigger/invoke?token=<devops-token>
+
+Manual: Jenkins → sync-devops-control-plane → Build Now
+
+Collaboration app webhook (separate):
+  job github-push-collaboration
+  token: jenkins/secrets/github-webhook-collab-token.txt
+
+
+--------------------------------------------------------------------------------
+14. VAULT + SECRETS ROOM
+--------------------------------------------------------------------------------
+
+Vault (file storage + UI, not -dev):
+  compose: vault/docker-compose.yml
+  UI:      http://SERVER_IP:8200/ui
+  once:   ./vault/scripts/bootstrap.sh
+  keys:    vault/secrets/vault-keys.env (gitignored)
+
+KV paths:
+  secret/collaboration/backend
+  secret/collaboration/frontend
+  secret/collaboration/compose
+
+Secrets Room (missing keys vs .env.example):
+  UI:      http://SERVER_IP:8300/
+  Apply → Jenkins apply-vault-env → export env files + recreate FE/BE
+
+Scripts:
+  ./scripts/vault-import-from-env.sh
+  ./scripts/vault-export-collaboration-env.sh
+  ./scripts/vault-apply-collaboration.sh
+  ./scripts/bootstrap-server-vault-room.sh
+
+Apps still use collaboration/env/*.env (Compose env_file). Vault is the
+management source; export writes those files.
+
+
+--------------------------------------------------------------------------------
+15. NEVER COMMIT
+--------------------------------------------------------------------------------
+
+  jenkins/secrets/admin.env
+  jenkins/secrets/github-webhook-*.txt
+  vault/secrets/vault-keys.env
+  vault/secrets/vault-approle.env
+  vault/secrets/operator-login.txt
+  secrets-room/.env
+  collaboration/env/*.env
+  **/.env.docker
 
 ================================================================================
-END OF NOTE
+END OF NOTE (server DevOps + Vault)
 ================================================================================

@@ -13,3 +13,4 @@ pipeline-utility-steps
 ansicolor
 junit
 htmlpublisher
+generic-webhook-trigger

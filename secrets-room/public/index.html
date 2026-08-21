@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Secrets Room — Collaboration</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Selamnew DevOps</p>
+      <h1>Secrets Room</h1>
+      <p class="sub">Manage Collaboration FE/BE env in Vault. Missing keys from <code>.env.example</code> show here.</p>
+    </div>
+    <div class="actions">
+      <button type="button" id="btn-refresh" class="ghost">Refresh</button>
+      <button type="button" id="btn-apply" class="primary">Apply to server</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <section class="banner" id="banner" hidden></section>
+
+  <main>
+    <section class="panel" id="missing-panel">
+      <h2>Missing keys</h2>
+      <p class="hint">Present in <code>.env.example</code> but not in Vault — add them before apply.</p>
+      <ul id="missing-list" class="key-list"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>Add / update key</h2>
+      <form id="upsert-form" class="form">
+        <label>
+          Key
+          <input name="key" id="key-input" list="key-suggestions" autocomplete="off" required />
+        </label>
+        <datalist id="key-suggestions"></datalist>
+        <label>
+          Value
+          <textarea name="value" id="value-input" rows="3" required></textarea>
+        </label>
+        <button type="submit" class="primary">Save to Vault</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Keys in Vault</h2>
+      <div class="meta" id="meta"></div>
+      <ul id="present-list" class="key-list"></ul>
+    </section>
+  </main>
+
+  <footer>
+    <span id="health"></span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

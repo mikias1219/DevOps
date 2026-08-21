@@ -1,0 +1,66 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '40'))
+  }
+
+  environment {
+    COMPOSE_FILE = '/var/devops/collaboration/docker-compose.yml'
+    ENV_FILE = '/var/devops/collaboration/.env.docker'
+  }
+
+  stages {
+    stage('Decide') {
+      steps {
+        script {
+          def ref = env.gh_ref ?: ''
+          echo "gh_ref=${ref}"
+          if (ref && !(ref ==~ /refs\/heads\/(develop|main|master)/)) {
+            echo "Ignoring push to ${ref}"
+            env.SKIP_PULL = 'true'
+          } else {
+            env.SKIP_PULL = 'false'
+          }
+        }
+      }
+    }
+
+    stage('Pull and recreate') {
+      when { expression { return env.SKIP_PULL != 'true' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . /var/devops/jenkins/docker-lib.sh
+
+          SOURCE="$(grep '^COLLABORATION_SOURCE=' "$ENV_FILE" | cut -d= -f2-)"
+          BACK_BRANCH="$(grep '^COLLABORATION_BACKEND_BRANCH=' "$ENV_FILE" | cut -d= -f2- || echo develop)"
+          FE_BRANCH="$(grep '^COLLABORATION_FRONTEND_BRANCH=' "$ENV_FILE" | cut -d= -f2- || echo develop)"
+          ref="${gh_ref:-}"
+
+          case "${ref}" in
+            refs/heads/*)
+              pushed="${ref#refs/heads/}"
+              if [ "$pushed" = "$BACK_BRANCH" ] || [ "$pushed" = "$FE_BRANCH" ] || \
+                 [ "$pushed" = develop ] || [ "$pushed" = main ] || [ "$pushed" = master ]; then
+                BACK_BRANCH="$pushed"
+                FE_BRANCH="$pushed"
+              fi
+              ;;
+          esac
+
+          echo "Pulling backend=${BACK_BRANCH} frontend=${FE_BRANCH}"
+          git_pull_repo "$SOURCE/backend" "$BACK_BRANCH"
+          git_pull_repo "$SOURCE/frontend" "$FE_BRANCH"
+          ensure_npm_packages "$SOURCE/backend"
+          ensure_npm_packages "$SOURCE/frontend"
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate backend frontend
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+        '''
+      }
+    }
+  }
+}

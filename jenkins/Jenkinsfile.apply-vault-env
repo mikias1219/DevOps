@@ -1,0 +1,58 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '30'))
+  }
+
+  parameters {
+    choice(
+      name: 'TARGET',
+      choices: ['both', 'backend', 'frontend'],
+      description: 'Which Collaboration env files to export from Vault and recreate'
+    )
+  }
+
+  environment {
+    COMPOSE_FILE = '/var/devops/collaboration/docker-compose.yml'
+    ENV_FILE = '/var/devops/collaboration/.env.docker'
+  }
+
+  stages {
+    stage('Export Vault → env files') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          export TARGET="${TARGET:-both}"
+          /var/devops/scripts/vault-export-collaboration-env.sh
+        '''
+      }
+    }
+
+    stage('Recreate Collaboration apps') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          case "${TARGET}" in
+            backend)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate backend
+              ;;
+            frontend)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate frontend
+              ;;
+            both)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate backend frontend
+              ;;
+            *)
+              echo "Unknown TARGET=${TARGET}" >&2
+              exit 1
+              ;;
+          esac
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+        '''
+      }
+    }
+  }
+}

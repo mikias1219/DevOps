@@ -1,0 +1,14 @@
+{
+  "name": "secrets-room",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Thin UI to manage Collaboration FE/BE env keys in HashiCorp Vault",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "node-fetch": "^2.7.0"
+  }
+}

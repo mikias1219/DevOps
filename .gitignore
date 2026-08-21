@@ -9,6 +9,21 @@
 # Copied app secrets — never commit (Firebase keys, Stripe, private keys)
 collaboration/env/*.env
 
+# Jenkins / Vault / Secrets Room — real secrets never in git
+jenkins/secrets/admin.env
+jenkins/secrets/github-webhook-token.txt
+jenkins/secrets/github-webhook-collab-token.txt
+jenkins/secrets/github-webhook-secret.txt
+jenkins/secrets/*.env
+!jenkins/secrets/*.example
+!jenkins/secrets/README.txt
+vault/secrets/vault-keys.env
+vault/secrets/vault-approle.env
+vault/secrets/operator-login.txt
+vault/data/
+secrets-room/.env
+secrets-room/secrets/
+
 .DS_Store
 *.swp
 *~
