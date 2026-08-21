@@ -18,6 +18,7 @@ pipeline {
   environment {
     COMPOSE_FILE = '/var/devops/collaboration/docker-compose.yml'
     ENV_FILE = '/var/devops/collaboration/.env.docker'
+    DEVOPS_HOST_PATH = '/home/ienetworks/workspace/tools/docker-devops'
   }
 
   stages {
@@ -26,6 +27,7 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           export TARGET="${TARGET:-both}"
+          export DEVOPS_HOST_PATH="${DEVOPS_HOST_PATH}"
           /var/devops/scripts/vault-export-collaboration-env.sh
         '''
       }
