@@ -1,8 +1,7 @@
-# Vault control-plane secrets stack
-# Usage:
-#   cp secrets/vault-keys.env.example secrets/vault-keys.env   # after bootstrap
-#   docker compose -f vault/docker-compose.yml up -d
-#   ./vault/scripts/bootstrap.sh   # first time only
+# Vault — file storage + UI (not -dev)
+# Start: docker compose -f vault/docker-compose.yml up -d
+# First time: ./vault/scripts/bootstrap.sh
+# After recreate: ./vault/scripts/unseal.sh (or cron)
 
 name: vault
 
@@ -12,25 +11,17 @@ services:
     container_name: selamnew-vault
     restart: unless-stopped
     ports:
-      - "8200:8200"
+      - "0.0.0.0:8200:8200"
     cap_add:
       - IPC_LOCK
     environment:
       VAULT_ADDR: http://127.0.0.1:8200
-      VAULT_API_ADDR: http://127.0.0.1:8200
     volumes:
       - ./config/vault.hcl:/vault/config/vault.hcl:ro
       - vault_data:/vault/file
-      - ./scripts/docker-entrypoint-unseal.sh:/usr/local/bin/docker-entrypoint-unseal.sh:ro
       - ./secrets:/vault/secrets:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/docker-entrypoint-unseal.sh"]
+    entrypoint: ["vault"]
     command: ["server", "-config=/vault/config/vault.hcl"]
-    healthcheck:
-      test: ["CMD-SHELL", "vault status -address=http://127.0.0.1:8200 >/dev/null 2>&1 || vault status -address=http://127.0.0.1:8200 2>&1 | grep -qi sealed"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
 
 volumes:
   vault_data:
