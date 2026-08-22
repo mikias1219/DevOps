@@ -10,6 +10,8 @@ This folder is the **control plane**. App source stays in the backend/frontend r
 | Collaboration source | `/home/mikias/workspace/company/SelamnewCollaboration` (separate GitHub repos) |
 | Housekeeper source | `/home/mikias/workspace/personal/my personal project/lifeos` (separate repo) |
 
+**Jenkins course (syntax + this folder, from scratch):** [`jenkins/README.md`](jenkins/README.md)
+
 **Rule:** run apps in Docker. Do not `npm install` / `npm run dev` on the host. Do not install pgAdmin on the host — use the Docker Adminer UI (below) or `docker exec`.
 
 ---
