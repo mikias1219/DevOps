@@ -1,25 +1,47 @@
 (() => {
-  let rooms = [];
-  let activeId = 'backend';
+  /** @type {Array<any>} */
+  let projects = [];
+  let activeProjectId = 'collaboration';
+  let activeEnvId = 'backend';
+  /** @type {any} */
   let snapshot = null;
+  let filterStatus = 'all';
+  let searchQuery = '';
 
-  const tabsEl = document.getElementById('tabs');
-  const missingList = document.getElementById('missing-list');
-  const presentList = document.getElementById('present-list');
-  const meta = document.getElementById('meta');
-  const suggestions = document.getElementById('key-suggestions');
-  const banner = document.getElementById('banner');
-  const health = document.getElementById('health');
-  const keyInput = document.getElementById('key-input');
-  const valueInput = document.getElementById('value-input');
+  const $ = (id) => document.getElementById(id);
 
-  function showBanner(text, isError) {
-    banner.hidden = !text;
-    banner.textContent = text || '';
-    banner.classList.toggle('error', Boolean(isError));
+  const els = {
+    projectNav: $('project-nav'),
+    vaultStatus: $('vault-status'),
+    projectEyebrow: $('project-eyebrow'),
+    projectTitle: $('project-title'),
+    projectDesc: $('project-desc'),
+    envTabs: $('env-tabs'),
+    statsGrid: $('stats-grid'),
+    keysBody: $('keys-body'),
+    keysMeta: $('keys-meta'),
+    keyInput: $('key-input'),
+    valueInput: $('value-input'),
+    suggestions: $('key-suggestions'),
+    pathsList: $('paths-list'),
+    toast: $('toast'),
+    searchInput: $('search-input'),
+    filterChips: $('filter-chips'),
+    editorTitle: $('editor-title'),
+  };
+
+  function showToast(text, isError = false) {
+    els.toast.hidden = !text;
+    els.toast.textContent = text || '';
+    els.toast.classList.toggle('error', isError);
+    if (text && !isError) {
+      setTimeout(() => {
+        if (els.toast.textContent === text) els.toast.hidden = true;
+      }, 6000);
+    }
   }
 
-  async function api(path, opts) {
+  async function api(path, opts = {}) {
     const res = await fetch(path, {
       headers: { 'Content-Type': 'application/json' },
       ...opts,
@@ -29,125 +51,318 @@
     return data;
   }
 
-  function renderTabs() {
-    tabsEl.innerHTML = '';
-    for (const r of rooms) {
+  function activeProject() {
+    return projects.find((p) => p.id === activeProjectId);
+  }
+
+  function statusLabel(status) {
+    const map = {
+      missing_vault: 'Missing in Vault',
+      missing_env: 'Missing on disk',
+      drift: 'Drift',
+      synced: 'Synced',
+      extra_vault: 'Extra in Vault',
+      optional: 'Optional',
+    };
+    return map[status] || status;
+  }
+
+  function renderVaultStatus(health) {
+    const wrap = els.vaultStatus;
+    wrap.classList.toggle('ok', health.ok && health.hasToken);
+    wrap.classList.toggle('err', !health.ok || !health.hasToken);
+    wrap.querySelector('.status-text').textContent = health.hasToken
+      ? `Vault ${health.vaultAddr.replace(/^https?:\/\//, '')}`
+      : 'Vault token missing';
+  }
+
+  function renderProjectNav() {
+    els.projectNav.innerHTML = '';
+    for (const p of projects) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = r.label;
-      btn.classList.toggle('active', r.id === activeId);
+      btn.className = `project-btn${p.id === activeProjectId ? ' active' : ''}`;
+      btn.innerHTML = `
+        <span class="project-dot" style="background:${p.accent}"></span>
+        <span class="project-info">
+          <span class="project-name">${esc(p.label)}</span>
+          <span class="project-meta">${esc(p.description)}</span>
+        </span>
+        <span class="project-badges">
+          ${p.totalMissing ? `<span class="badge badge-warn">${p.totalMissing}</span>` : ''}
+          ${p.totalDrift ? `<span class="badge badge-danger">${p.totalDrift}</span>` : ''}
+        </span>
+      `;
       btn.addEventListener('click', () => {
-        activeId = r.id;
-        renderTabs();
-        loadRoom();
+        activeProjectId = p.id;
+        activeEnvId = p.envFiles[0]?.id || 'backend';
+        renderProjectNav();
+        renderProjectHeader();
+        renderEnvTabs();
+        loadEnv().catch((e) => showToast(e.message, true));
       });
-      tabsEl.appendChild(btn);
+      els.projectNav.appendChild(btn);
     }
   }
 
-  function renderRoom() {
-    if (!snapshot) return;
-    missingList.innerHTML = '';
-    presentList.innerHTML = '';
-    suggestions.innerHTML = '';
+  function renderProjectHeader() {
+    const p = activeProject();
+    if (!p) return;
+    els.projectEyebrow.textContent = 'Project';
+    els.projectTitle.textContent = p.label;
+    els.projectDesc.textContent = p.description;
+  }
 
-    meta.textContent = [
-      `${snapshot.present.length} in Vault`,
-      `${snapshot.missing.length} missing`,
-      `${snapshot.extra.length} extra`,
-      snapshot.exampleExists ? 'example found' : 'WARNING: .env.example missing',
-    ].join(' · ');
-
-    for (const k of snapshot.missing) {
-      const li = document.createElement('li');
-      li.className = 'missing';
-      li.textContent = k;
-      li.title = 'Click to fill form';
-      li.addEventListener('click', () => {
-        keyInput.value = k;
-        valueInput.focus();
+  function renderEnvTabs() {
+    const p = activeProject();
+    if (!p) return;
+    els.envTabs.innerHTML = '';
+    for (const ef of p.envFiles) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `env-tab${ef.id === activeEnvId ? ' active' : ''}`;
+      const s = ef.stats;
+      const warn = s?.missingVault ? `<span class="mini-stat warn">${s.missingVault} missing</span>` : '';
+      const drift =
+        s && (s.drift || s.missingEnv)
+          ? `<span class="mini-stat drift">${s.drift + s.missingEnv} drift</span>`
+          : '';
+      const ok = s?.synced ? `<span class="mini-stat ok">${s.synced} synced</span>` : '';
+      btn.innerHTML = `
+        <span class="env-tab-label">${esc(ef.label)}</span>
+        <span class="env-tab-sub">${esc(ef.subtitle || '')}</span>
+        <span class="env-tab-stats">${warn}${drift}${ok}</span>
+      `;
+      btn.addEventListener('click', () => {
+        activeEnvId = ef.id;
+        renderEnvTabs();
+        loadEnv().catch((e) => showToast(e.message, true));
       });
-      missingList.appendChild(li);
+      els.envTabs.appendChild(btn);
     }
-    if (!snapshot.missing.length) {
-      const li = document.createElement('li');
-      li.textContent = 'None — all example keys present';
-      missingList.appendChild(li);
+  }
+
+  function renderStats() {
+    if (!snapshot?.stats) {
+      els.statsGrid.innerHTML = '';
+      return;
+    }
+    const s = snapshot.stats;
+    els.statsGrid.innerHTML = `
+      <div class="stat-card"><div class="stat-label">Expected keys</div><div class="stat-value">${s.expected}</div></div>
+      <div class="stat-card"><div class="stat-label">In Vault</div><div class="stat-value">${s.vault}</div></div>
+      <div class="stat-card"><div class="stat-label">On disk</div><div class="stat-value">${s.env}</div></div>
+      <div class="stat-card"><div class="stat-label">Missing in Vault</div><div class="stat-value${s.missingVault ? ' warn' : ''}">${s.missingVault}</div></div>
+      <div class="stat-card"><div class="stat-label">Drift / not exported</div><div class="stat-value${s.drift + s.missingEnv ? ' drift' : ''}">${s.drift + s.missingEnv}</div></div>
+      <div class="stat-card"><div class="stat-label">Synced</div><div class="stat-value${s.synced ? ' ok' : ''}">${s.synced}</div></div>
+    `;
+  }
+
+  function filteredKeys() {
+    if (!snapshot?.keys) return [];
+    return snapshot.keys.filter((row) => {
+      if (filterStatus !== 'all' && row.status !== filterStatus) return false;
+      if (searchQuery && !row.key.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+  }
+
+  function renderKeysTable() {
+    const rows = filteredKeys();
+    els.keysMeta.textContent = `${rows.length} shown · ${snapshot?.keys?.length || 0} total`;
+    els.keysBody.innerHTML = '';
+
+    if (!rows.length) {
+      const tr = document.createElement('tr');
+      tr.className = 'empty-row';
+      tr.innerHTML = `<td colspan="5">No keys match the current filter</td>`;
+      els.keysBody.appendChild(tr);
+      return;
     }
 
-    for (const k of snapshot.present) {
-      const li = document.createElement('li');
-      if (snapshot.extra.includes(k)) li.className = 'extra';
-      li.textContent = `${k} = ${snapshot.values[k] || '(empty)'}`;
-      li.addEventListener('click', () => {
-        keyInput.value = k;
-        valueInput.value = '';
-        valueInput.placeholder = 'Enter new value to overwrite';
-        valueInput.focus();
+    for (const row of rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><span class="key-name">${esc(row.key)}</span></td>
+        <td><span class="status-pill ${row.status}">${statusLabel(row.status)}</span></td>
+        <td><span class="key-val${row.vaultEmpty ? ' empty' : ''}">${row.inVault ? esc(row.vaultValue || '(empty)') : '—'}</span></td>
+        <td><span class="key-val${row.envEmpty ? ' empty' : ''}">${row.inEnv ? esc(row.envValue || '(empty)') : '—'}</span></td>
+        <td>
+          <button type="button" class="icon-btn btn-edit" title="Edit" aria-label="Edit ${esc(row.key)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </td>
+      `;
+      tr.addEventListener('click', (ev) => {
+        if (ev.target.closest('.icon-btn')) return;
+        selectKey(row.key);
       });
-      presentList.appendChild(li);
+      tr.querySelector('.btn-edit').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        selectKey(row.key);
+      });
+      els.keysBody.appendChild(tr);
     }
 
-    const all = [...new Set([...snapshot.expected, ...snapshot.present])];
-    for (const k of all) {
+    els.suggestions.innerHTML = '';
+    const allKeys = [...new Set(snapshot.keys.map((k) => k.key))];
+    for (const k of allKeys) {
       const opt = document.createElement('option');
       opt.value = k;
-      suggestions.appendChild(opt);
+      els.suggestions.appendChild(opt);
     }
   }
 
-  async function loadRoom() {
-    showBanner('');
-    snapshot = await api(`/api/rooms/${activeId}`);
-    renderRoom();
+  function renderPaths() {
+    if (!snapshot) return;
+    els.pathsList.innerHTML = `
+      <dt>Vault path</dt>
+      <dd>${esc(snapshot.vaultPath)}</dd>
+      <dt>Env file</dt>
+      <dd>${esc(snapshot.envFile)}${snapshot.envExists ? '' : ' (not found)'}</dd>
+      <dt>Example template</dt>
+      <dd>${esc(snapshot.exampleFile)}${snapshot.exampleExists ? '' : ' (not found)'}</dd>
+    `;
+  }
+
+  function selectKey(key) {
+    els.keyInput.value = key;
+    els.valueInput.value = '';
+    els.valueInput.placeholder = 'Enter new value to save to Vault';
+    els.editorTitle.textContent = `Edit: ${key}`;
+    els.valueInput.focus();
+  }
+
+  function esc(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  async function loadProjects() {
+    projects = await api('/api/projects');
+    if (!projects.length) throw new Error('No projects configured');
+    if (!projects.find((p) => p.id === activeProjectId)) {
+      activeProjectId = projects[0].id;
+    }
+    const p = activeProject();
+    if (!p.envFiles.find((e) => e.id === activeEnvId)) {
+      activeEnvId = p.envFiles[0]?.id || 'backend';
+    }
+    renderProjectNav();
+    renderProjectHeader();
+    renderEnvTabs();
+  }
+
+  async function loadEnv() {
+    showToast('');
+    snapshot = await api(`/api/projects/${activeProjectId}/env/${activeEnvId}`);
+    renderStats();
+    renderKeysTable();
+    renderPaths();
+    await loadProjects();
+    renderEnvTabs();
   }
 
   async function boot() {
     try {
-      const h = await api('/api/health');
-      health.textContent = `Vault ${h.vaultAddr} · token ${h.hasToken ? 'ok' : 'MISSING'} · source ${h.collabSource}`;
-      rooms = await api('/api/rooms');
-      if (!rooms.length) throw new Error('No rooms');
-      activeId = rooms[0].id;
-      renderTabs();
-      await loadRoom();
+      const health = await api('/api/health');
+      renderVaultStatus(health);
+      await loadProjects();
+      await loadEnv();
     } catch (e) {
-      showBanner(e.message, true);
+      showToast(e.message, true);
+      renderVaultStatus({ ok: false, hasToken: false, vaultAddr: '' });
     }
   }
 
-  document.getElementById('btn-refresh').addEventListener('click', () => {
-    loadRoom().catch((e) => showBanner(e.message, true));
+  $('btn-refresh').addEventListener('click', () => {
+    boot().catch((e) => showToast(e.message, true));
   });
 
-  document.getElementById('btn-apply').addEventListener('click', async () => {
-    showBanner('Applying… exporting Vault → env files and recreating containers…');
+  $('btn-apply-project').addEventListener('click', async () => {
+    const p = activeProject();
+    const target = snapshot?.applyTarget || p?.applyTarget || 'both';
+    showToast(`Applying ${p?.label || activeProjectId} (TARGET=${target})…`);
     try {
       const result = await api('/api/apply', {
         method: 'POST',
-        body: JSON.stringify({ target: 'both' }),
+        body: JSON.stringify({ target }),
       });
-      showBanner(result.output || 'Applied.');
+      showToast(result.output || 'Apply triggered successfully.');
+      await loadEnv();
     } catch (e) {
-      showBanner(e.message, true);
+      showToast(e.message, true);
     }
   });
 
-  document.getElementById('upsert-form').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const key = keyInput.value.trim();
-    const value = valueInput.value;
+  $('btn-import-file').addEventListener('click', async () => {
+    if (!confirm('Import all keys from the env file on disk into Vault?')) return;
     try {
-      await api(`/api/rooms/${activeId}/keys`, {
+      const result = await api(
+        `/api/projects/${activeProjectId}/env/${activeEnvId}/import-from-file`,
+        { method: 'POST' },
+      );
+      showToast(result.message || 'Imported.');
+      await loadEnv();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  });
+
+  $('btn-export-file').addEventListener('click', async () => {
+    if (!confirm('Export Vault keys to the env file on disk? (Does not restart containers)')) return;
+    try {
+      const result = await api(
+        `/api/projects/${activeProjectId}/env/${activeEnvId}/export-to-file`,
+        { method: 'POST' },
+      );
+      showToast(result.message || 'Exported.');
+      await loadEnv();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  });
+
+  $('key-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const key = els.keyInput.value.trim();
+    const value = els.valueInput.value;
+    if (!key) return;
+    try {
+      await api(`/api/projects/${activeProjectId}/env/${activeEnvId}/keys`, {
         method: 'PUT',
         body: JSON.stringify({ key, value }),
       });
-      valueInput.value = '';
-      showBanner(`Saved ${key} to Vault`);
-      await loadRoom();
+      els.valueInput.value = '';
+      els.editorTitle.textContent = 'Add / update key';
+      showToast(`Saved ${key} to Vault`);
+      await loadEnv();
     } catch (e) {
-      showBanner(e.message, true);
+      showToast(e.message, true);
     }
+  });
+
+  $('btn-clear-form').addEventListener('click', () => {
+    els.keyInput.value = '';
+    els.valueInput.value = '';
+    els.editorTitle.textContent = 'Add / update key';
+  });
+
+  els.searchInput.addEventListener('input', () => {
+    searchQuery = els.searchInput.value.trim();
+    renderKeysTable();
+  });
+
+  els.filterChips.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.chip');
+    if (!chip) return;
+    filterStatus = chip.dataset.filter || 'all';
+    els.filterChips.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+    chip.classList.add('active');
+    renderKeysTable();
   });
 
   boot();

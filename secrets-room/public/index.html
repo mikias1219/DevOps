@@ -3,59 +3,132 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Secrets Room — Collaboration</title>
+  <title>Secrets Room — Vault Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header class="top">
-    <div>
-      <p class="eyebrow">Selamnew DevOps</p>
-      <h1>Secrets Room</h1>
-      <p class="sub">Manage Collaboration FE/BE env in Vault. Missing keys from <code>.env.example</code> show here.</p>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <div>
+          <p class="brand-eyebrow">Selamnew DevOps</p>
+          <h1 class="brand-title">Secrets Room</h1>
+        </div>
+      </div>
+
+      <p class="sidebar-label">Projects</p>
+      <nav class="project-nav" id="project-nav" aria-label="Projects"></nav>
+
+      <div class="sidebar-footer">
+        <div class="vault-status" id="vault-status">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting…</span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="workspace-header">
+        <div class="header-main">
+          <p class="header-eyebrow" id="project-eyebrow">Project</p>
+          <h2 class="header-title" id="project-title">—</h2>
+          <p class="header-desc" id="project-desc"></p>
+        </div>
+        <div class="header-actions">
+          <button type="button" class="btn btn-ghost" id="btn-refresh" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+            Refresh
+          </button>
+          <button type="button" class="btn btn-primary" id="btn-apply-project">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
+            Apply project
+          </button>
+        </div>
+      </header>
+
+      <div class="toast" id="toast" role="status" hidden></div>
+
+      <nav class="env-tabs" id="env-tabs" aria-label="Environment files"></nav>
+
+      <section class="stats-grid" id="stats-grid"></section>
+
+      <div class="toolbar">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="search" id="search-input" placeholder="Search keys…" autocomplete="off" />
+        </div>
+        <div class="filter-chips" id="filter-chips">
+          <button type="button" class="chip active" data-filter="all">All</button>
+          <button type="button" class="chip" data-filter="missing_vault">Missing in Vault</button>
+          <button type="button" class="chip" data-filter="missing_env">Missing on disk</button>
+          <button type="button" class="chip" data-filter="drift">Drift</button>
+          <button type="button" class="chip" data-filter="synced">Synced</button>
+        </div>
+        <div class="toolbar-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-import-file">Import disk → Vault</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-export-file">Export Vault → disk</button>
+        </div>
+      </div>
+
+      <div class="panels">
+        <section class="panel keys-panel">
+          <div class="panel-head">
+            <h3>Environment keys</h3>
+            <span class="panel-meta" id="keys-meta"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="keys-table" id="keys-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Status</th>
+                  <th>Vault</th>
+                  <th>Env file</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="keys-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <aside class="panel editor-panel">
+          <div class="panel-head">
+            <h3 id="editor-title">Add / update key</h3>
+          </div>
+          <form id="key-form" class="key-form">
+            <label>
+              <span>Key name</span>
+              <input name="key" id="key-input" list="key-suggestions" autocomplete="off" required />
+            </label>
+            <datalist id="key-suggestions"></datalist>
+            <label>
+              <span>Value</span>
+              <textarea name="value" id="value-input" rows="4" placeholder="Paste secret value…" required></textarea>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary btn-block">Save to Vault</button>
+              <button type="button" class="btn btn-ghost btn-block" id="btn-clear-form">Clear</button>
+            </div>
+          </form>
+
+          <div class="paths-card">
+            <h4>Paths</h4>
+            <dl id="paths-list"></dl>
+          </div>
+        </aside>
+      </div>
     </div>
-    <div class="actions">
-      <button type="button" id="btn-refresh" class="ghost">Refresh</button>
-      <button type="button" id="btn-apply" class="primary">Apply to server</button>
-    </div>
-  </header>
-
-  <nav class="tabs" id="tabs"></nav>
-
-  <section class="banner" id="banner" hidden></section>
-
-  <main>
-    <section class="panel" id="missing-panel">
-      <h2>Missing keys</h2>
-      <p class="hint">Present in <code>.env.example</code> but not in Vault — add them before apply.</p>
-      <ul id="missing-list" class="key-list"></ul>
-    </section>
-
-    <section class="panel">
-      <h2>Add / update key</h2>
-      <form id="upsert-form" class="form">
-        <label>
-          Key
-          <input name="key" id="key-input" list="key-suggestions" autocomplete="off" required />
-        </label>
-        <datalist id="key-suggestions"></datalist>
-        <label>
-          Value
-          <textarea name="value" id="value-input" rows="3" required></textarea>
-        </label>
-        <button type="submit" class="primary">Save to Vault</button>
-      </form>
-    </section>
-
-    <section class="panel">
-      <h2>Keys in Vault</h2>
-      <div class="meta" id="meta"></div>
-      <ul id="present-list" class="key-list"></ul>
-    </section>
-  </main>
-
-  <footer>
-    <span id="health"></span>
-  </footer>
+  </div>
 
   <script src="/app.js"></script>
 </body>
