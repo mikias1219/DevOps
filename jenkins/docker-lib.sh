@@ -454,3 +454,73 @@ build_collaboration_frontend() {
     --build-arg NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1 \
     -t "$tag" "$source/frontend"
 }
+
+# Start Collaboration infra the backend depends on (ES was missing from older Jenkins jobs).
+ensure_collaboration_infra() {
+  compose_file="$1"
+  env_file="$2"
+  echo "==> Ensuring collaboration db + redis + elasticsearch"
+  docker compose -f "$compose_file" --env-file "$env_file" up -d db redis elasticsearch
+}
+
+# Wait for backend liveness probe (/api/v1/health). Prints logs on failure.
+wait_collaboration_backend_smoke() {
+  compose_file="$1"
+  env_file="$2"
+  service="${3:-backend}"
+  max_tries="${4:-90}"
+  probe="require('http').get('http://127.0.0.1:5000/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
+  echo "==> Waiting for ${service} at http://127.0.0.1:5000/api/v1/health"
+  _i=1
+  while [ "$_i" -le "$max_tries" ]; do
+    _state="$(docker compose -f "$compose_file" --env-file "$env_file" ps "$service" --format '{{.State}}' 2>/dev/null || true)"
+    if [ "$_state" != "running" ]; then
+      echo "  attempt ${_i}/${max_tries}: container state=${_state:-unknown}"
+    elif docker compose -f "$compose_file" --env-file "$env_file" exec -T "$service" \
+      node -e "$probe"; then
+      echo "collaboration backend healthy"
+      return 0
+    else
+      echo "  attempt ${_i}/${max_tries}: health probe failed (exit $?)"
+    fi
+    sleep 3
+    _i=$((_i + 1))
+  done
+
+  echo "ERROR: ${service} did not become healthy after ${max_tries} attempts" >&2
+  docker compose -f "$compose_file" --env-file "$env_file" ps db redis elasticsearch "$service" 2>/dev/null || true
+  docker compose -f "$compose_file" --env-file "$env_file" logs --tail 120 "$service" 2>&1 || true
+  return 1
+}
+
+# Wait for frontend dev server inside the container.
+wait_collaboration_frontend_smoke() {
+  compose_file="$1"
+  env_file="$2"
+  service="${3:-frontend}"
+  max_tries="${4:-60}"
+  probe="require('http').get('http://127.0.0.1:3001/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+
+  echo "==> Waiting for ${service} at http://127.0.0.1:3001/"
+  _i=1
+  while [ "$_i" -le "$max_tries" ]; do
+    _state="$(docker compose -f "$compose_file" --env-file "$env_file" ps "$service" --format '{{.State}}' 2>/dev/null || true)"
+    if [ "$_state" != "running" ]; then
+      echo "  attempt ${_i}/${max_tries}: container state=${_state:-unknown}"
+    elif docker compose -f "$compose_file" --env-file "$env_file" exec -T "$service" \
+      node -e "$probe"; then
+      echo "collaboration frontend healthy"
+      return 0
+    else
+      echo "  attempt ${_i}/${max_tries}: health probe failed (exit $?)"
+    fi
+    sleep 3
+    _i=$((_i + 1))
+  done
+
+  echo "ERROR: ${service} did not become healthy after ${max_tries} attempts" >&2
+  docker compose -f "$compose_file" --env-file "$env_file" ps "$service" 2>/dev/null || true
+  docker compose -f "$compose_file" --env-file "$env_file" logs --tail 120 "$service" 2>&1 || true
+  return 1
+}

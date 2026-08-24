@@ -25,28 +25,30 @@ pipeline {
           echo "ACTION=${ACTION}"
           case "${ACTION}" in
             start)
+              ensure_collaboration_infra "$COMPOSE_FILE" "$ENV_FILE"
               ensure_npm_packages "$SOURCE/backend"
-              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d db redis "$SERVICE"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$SERVICE"
               ;;
             stop)
               docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE"
               ;;
             restart)
               docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$SERVICE" || true
+              ensure_collaboration_infra "$COMPOSE_FILE" "$ENV_FILE"
               ensure_npm_packages "$SOURCE/backend"
-              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d db redis "$SERVICE"
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$SERVICE"
               ;;
             build-and-start|update-from-github)
               if [ "${ACTION}" = "update-from-github" ]; then
                 git_pull_repo "$SOURCE/backend" "$BRANCH"
               fi
               install_npm_packages "$SOURCE/backend"
-              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d db redis
+              ensure_collaboration_infra "$COMPOSE_FILE" "$ENV_FILE"
               docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate "$SERVICE"
               ;;
             *) echo "Unknown ACTION: ${ACTION}" >&2; exit 1 ;;
           esac
-          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps "$SERVICE" db redis
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps db redis elasticsearch "$SERVICE"
         '''
       }
     }
@@ -54,16 +56,11 @@ pipeline {
     stage('Smoke') {
       when { expression { return params.ACTION != 'stop' } }
       steps {
-        sh '''
+        sh '''#!/usr/bin/env bash
           set -euo pipefail
-          for i in $(seq 1 60); do
-            if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T "$SERVICE" \
-              node -e "require('http').get('http://127.0.0.1:5000/api/v1/spaces',r=>process.exit(r.statusCode>0?0:1)).on('error',()=>process.exit(1))" 2>/dev/null; then
-              echo "collaboration backend healthy"; exit 0
-            fi
-            sleep 3
-          done
-          exit 1
+          # shellcheck source=/dev/null
+          . /var/devops/jenkins/docker-lib.sh
+          wait_collaboration_backend_smoke "$COMPOSE_FILE" "$ENV_FILE" "$SERVICE"
         '''
       }
     }

@@ -107,12 +107,12 @@ services:
       test:
         [
           "CMD-SHELL",
-          "node -e \"require('http').get('http://127.0.0.1:5000/api/v1/spaces',r=>process.exit(r.statusCode>0?0:1)).on('error',()=>process.exit(1))\"",
+          "node -e \"require('http').get('http://127.0.0.1:5000/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"",
         ]
       interval: 15s
       timeout: 5s
       retries: 15
-      start_period: 90s
+      start_period: 120s
 
   frontend:
     image: node:20-bookworm-slim
