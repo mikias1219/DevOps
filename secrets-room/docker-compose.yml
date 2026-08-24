@@ -13,7 +13,7 @@ services:
       - ./.env
     environment:
       PORT: "8300"
-      VAULT_ADDR: "${VAULT_ADDR:-http://172.16.50.39:8200}"
+      VAULT_ADDR: "${VAULT_ADDR:-http://host.docker.internal:8200}"
       DEVOPS_ROOT: /var/devops
       COLLABORATION_SOURCE: "${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}"
     volumes:

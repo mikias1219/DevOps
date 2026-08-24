@@ -99,6 +99,12 @@ body {
   letter-spacing: -0.02em;
 }
 
+.brand-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
 .sidebar-label {
   margin: 1rem 1rem 0.5rem;
   font-size: 0.7rem;
