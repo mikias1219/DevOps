@@ -92,16 +92,16 @@ path "secret/metadata/housekeeper/" {
   capabilities = ["list"]
 }
 path "secret/data/collaboration/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
+  capabilities = ["create", "read", "update", "patch", "delete", "list"]
 }
 path "secret/metadata/collaboration/*" {
-  capabilities = ["list", "read", "delete"]
+  capabilities = ["list", "read", "update", "delete"]
 }
 path "secret/data/housekeeper/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
+  capabilities = ["create", "read", "update", "patch", "delete", "list"]
 }
 path "secret/metadata/housekeeper/*" {
-  capabilities = ["list", "read", "delete"]
+  capabilities = ["list", "read", "update", "delete"]
 }
 EOF
 
