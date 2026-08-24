@@ -76,10 +76,31 @@ echo "==> Enable KV v2 at secret/"
 
 echo "==> Write collaboration policies"
 "$VAULT_BIN" policy write collaboration-admin - <<'EOF'
+path "secret/metadata/" {
+  capabilities = ["list"]
+}
+path "secret/metadata/collaboration" {
+  capabilities = ["list"]
+}
+path "secret/metadata/collaboration/" {
+  capabilities = ["list"]
+}
+path "secret/metadata/housekeeper" {
+  capabilities = ["list"]
+}
+path "secret/metadata/housekeeper/" {
+  capabilities = ["list"]
+}
 path "secret/data/collaboration/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
 path "secret/metadata/collaboration/*" {
+  capabilities = ["list", "read", "delete"]
+}
+path "secret/data/housekeeper/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "secret/metadata/housekeeper/*" {
   capabilities = ["list", "read", "delete"]
 }
 EOF
