@@ -25,16 +25,35 @@ to_github_ssh_url() {
   esac
 }
 
+# Return 0 if npm install is needed (missing node_modules or listed deps).
+npm_install_needed() {
+  dir="$1"
+  if [ ! -d "$dir/node_modules" ]; then
+    return 0
+  fi
+  # Incomplete trees: skip-install previously left firebase-admin / webpack out.
+  if grep -q '"firebase-admin"' "$dir/package.json" 2>/dev/null \
+    && [ ! -d "$dir/node_modules/firebase-admin" ]; then
+    echo "==> firebase-admin missing in $dir — npm install required"
+    return 0
+  fi
+  if grep -q '"webpack"' "$dir/package.json" 2>/dev/null \
+    && [ ! -d "$dir/node_modules/webpack" ] && [ ! -d "$dir/node_modules/@nestjs/cli" ]; then
+    echo "==> webpack/nest CLI missing in $dir — npm install required"
+    return 0
+  fi
+  return 1
+}
+
 # Always npm install into a bind-mounted app dir (used before Jenkins build/update).
-# Skips when node_modules already present — remove node_modules to force reinstall.
 install_npm_packages() {
   dir="$1"
   if [ ! -f "$dir/package.json" ]; then
     echo "No package.json in $dir" >&2
     return 1
   fi
-  if [ -d "$dir/node_modules" ]; then
-    echo "==> node_modules present in $dir — skip apt/npm (delete node_modules to force reinstall)"
+  if ! npm_install_needed "$dir"; then
+    echo "==> node_modules complete in $dir — skip apt/npm (delete node_modules to force reinstall)"
     return 0
   fi
   echo "==> npm install in $dir"
@@ -45,14 +64,14 @@ install_npm_packages() {
     sh -c 'apt-get update && apt-get install -y --no-install-recommends python3 make g++ >/dev/null && npm install --no-audit --no-fund --legacy-peer-deps'
 }
 
-# Install only when node_modules is missing (start/restart).
+# Install when node_modules or critical deps are missing (start/restart).
 ensure_npm_packages() {
   dir="$1"
   if [ ! -f "$dir/package.json" ]; then
     echo "No package.json in $dir" >&2
     return 1
   fi
-  if [ -d "$dir/node_modules" ] && [ -f "$dir/node_modules/.package-lock.json" ]; then
+  if ! npm_install_needed "$dir"; then
     echo "==> packages already installed in $dir — skip npm install"
     return 0
   fi

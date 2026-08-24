@@ -95,8 +95,9 @@ services:
       [
         "sh",
         "-c",
-        "if [ ! -d node_modules ]; then echo '==> node_modules missing — npm install'; npm install --no-audit --no-fund --legacy-peer-deps; else echo '==> node_modules present — skip npm install'; fi; \
+        "if [ ! -d node_modules ] || [ ! -d node_modules/firebase-admin ]; then echo '==> installing npm packages (firebase-admin required)'; npm install --no-audit --no-fund --legacy-peer-deps; else echo '==> node_modules present — skip full npm install'; fi; \
          node -e \"require.resolve('webpack')\" >/dev/null 2>&1 || (echo '==> webpack missing — installing webpack'; npm install --no-audit --no-fund --legacy-peer-deps webpack webpack-cli); \
+         node -e \"require.resolve('firebase-admin/app')\" >/dev/null 2>&1 || (echo '==> firebase-admin missing — installing'; npm install --no-audit --no-fund --legacy-peer-deps firebase-admin@12.7.0); \
          npm run start:dev",
       ]
     volumes:
@@ -137,7 +138,7 @@ services:
       [
         "sh",
         "-c",
-        "if [ ! -d node_modules ]; then echo '==> node_modules missing — npm install'; npm install --no-audit --no-fund --legacy-peer-deps; else echo '==> node_modules present — skip npm install'; fi; rm -rf /tmp/next-panic-* /app/.next/dev/cache 2>/dev/null; npx next dev --webpack -H 0.0.0.0 -p 3001",
+        "if [ ! -d node_modules ] || [ ! -x node_modules/.bin/next ]; then echo '==> installing frontend npm packages'; npm install --no-audit --no-fund --legacy-peer-deps; else echo '==> node_modules present — skip npm install'; fi; rm -rf /tmp/next-panic-* /app/.next/dev/cache 2>/dev/null; npx next dev --webpack -H 0.0.0.0 -p 3001",
       ]
     volumes:
       - ${COLLABORATION_SOURCE}/frontend:/app
