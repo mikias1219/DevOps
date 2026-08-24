@@ -16,7 +16,6 @@ jenkins/secrets/github-webhook-collab-token.txt
 jenkins/secrets/github-webhook-secret.txt
 jenkins/secrets/*.env
 !jenkins/secrets/*.example
-!jenkins/secrets/README.txt
 vault/secrets/vault-keys.env
 vault/secrets/vault-approle.env
 vault/secrets/operator-login.txt
