@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in — Secrets Room</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-card">
+      <div class="login-brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <p class="brand-eyebrow">Selamnew DevOps</p>
+        <h1>Secrets Room</h1>
+        <p class="login-lead">Unified Vault manager for Collaboration env keys.</p>
+      </div>
+
+      <form id="login-form" class="login-form" autocomplete="on">
+        <label>
+          <span>Username</span>
+          <input name="username" type="text" autocomplete="username" required autofocus />
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <p class="login-error" id="login-error" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="login-submit">Sign in</button>
+      </form>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById('login-form');
+    const err = document.getElementById('login-error');
+    const btn = document.getElementById('login-submit');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      btn.disabled = true;
+      const fd = new FormData(form);
+      try {
+        const root = location.pathname.indexOf('/secrets') === 0 ? '/secrets' : '';
+        const res = await fetch(root + '/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: fd.get('username'),
+            password: fd.get('password'),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Sign in failed');
+        location.href = root + '/';
+      } catch (e) {
+        err.textContent = e.message;
+        err.hidden = false;
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

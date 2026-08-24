@@ -7,6 +7,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const fetch = require('node-fetch');
 
@@ -320,22 +321,80 @@ async function buildProjectSummary(projectId) {
   };
 }
 
-function basicAuth(req, res, next) {
+const COOKIE_NAME = 'sr_session';
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_SECRET = process.env.ROOM_SESSION_SECRET
+  || crypto.createHash('sha256').update(`secrets-room:${BASIC_USER}:${BASIC_PASS}`).digest('hex');
+
+function parseCookies(req) {
+  const out = {};
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i < 1) continue;
+    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+
+function signSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+function readSession(token) {
+  if (!token || !token.includes('.')) return null;
+  const [body, sig] = token.split('.');
+  const expect = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!data || data.exp < Date.now()) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function setSessionCookie(res, token, maxAgeSec) {
+  res.setHeader(
+    'Set-Cookie',
+    `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}`,
+  );
+}
+
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function isPublicPath(req) {
+  const p = req.path;
+  return (
+    p === '/login.html'
+    || p === '/styles.css'
+    ||     p === '/api/login'
+    || p === '/api/logout'
+    || p === '/favicon.ico'
+  );
+}
+
+function requireLogin(req, res, next) {
   if (!BASIC_PASS) return next();
-  const hdr = req.headers.authorization || '';
-  if (!hdr.startsWith('Basic ')) {
-    res.set('WWW-Authenticate', 'Basic realm="Secrets Room"');
-    return res.status(401).send('Auth required');
+  if (isPublicPath(req)) return next();
+  const sess = readSession(parseCookies(req)[COOKIE_NAME]);
+  if (sess) {
+    req.user = sess.u;
+    return next();
   }
-  const decoded = Buffer.from(hdr.slice(6), 'base64').toString('utf8');
-  const idx = decoded.indexOf(':');
-  const user = decoded.slice(0, idx);
-  const pass = decoded.slice(idx + 1);
-  if (user !== BASIC_USER || pass !== BASIC_PASS) {
-    res.set('WWW-Authenticate', 'Basic realm="Secrets Room"');
-    return res.status(401).send('Invalid credentials');
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'login required' });
   }
-  return next();
+  return res.redirect('/login.html');
 }
 
 function runScript(scriptPath, env = {}) {
@@ -393,8 +452,26 @@ async function triggerJenkinsApply(target) {
 }
 
 const app = express();
-app.use(basicAuth);
 app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+app.post('/api/login', (req, res) => {
+  const user = String((req.body && req.body.username) || '').trim();
+  const pass = String((req.body && req.body.password) || '');
+  if (!BASIC_PASS || !safeEqual(user, BASIC_USER) || !safeEqual(pass, BASIC_PASS)) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  const token = signSession({ u: user, exp: Date.now() + SESSION_TTL_MS });
+  setSessionCookie(res, token, Math.floor(SESSION_TTL_MS / 1000));
+  res.json({ ok: true });
+});
+
+app.post('/api/logout', (_req, res) => {
+  setSessionCookie(res, '', 0);
+  res.json({ ok: true });
+});
+
+app.use(requireLogin);
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/health', (_req, res) => {

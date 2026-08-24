@@ -41,11 +41,18 @@
     }
   }
 
+  const API_ROOT = location.pathname.startsWith('/secrets') ? '/secrets' : '';
+
   async function api(path, opts = {}) {
-    const res = await fetch(path, {
+    const res = await fetch(API_ROOT + path, {
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       ...opts,
     });
+    if (res.status === 401) {
+      location.href = API_ROOT + '/login.html';
+      throw new Error('login required');
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || res.statusText);
     return data;
@@ -364,6 +371,15 @@
     chip.classList.add('active');
     renderKeysTable();
   });
+
+  const logoutBtn = $('btn-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      const root = location.pathname.startsWith('/secrets') ? '/secrets' : '';
+      await fetch(root + '/api/logout', { method: 'POST', credentials: 'same-origin' });
+      location.href = root + '/login.html';
+    });
+  }
 
   boot();
 })();
