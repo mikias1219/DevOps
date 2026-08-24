@@ -8,7 +8,8 @@ services:
     container_name: selamnew-secrets-room
     restart: unless-stopped
     ports:
-      - "8300:8300"
+      # Internal only — operator UI is HashiCorp Vault :8200
+      - "127.0.0.1:8300:8300"
     env_file:
       - ./.env
     environment:

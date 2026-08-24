@@ -11,9 +11,7 @@ services:
     container_name: selamnew-vault
     restart: unless-stopped
     ports:
-      # Loopback only — HashiCorp UI is not the operator UI.
-      # Operators use Secrets Room on :8300 (the unified secrets UI).
-      - "127.0.0.1:8200:8200"
+      - "0.0.0.0:8200:8200"
     cap_add:
       - IPC_LOCK
     environment:

@@ -79,18 +79,18 @@ services:
     env_file:
       - ./env/backend.env
     environment:
-      APP_PORT: 5000
-      APP_PUBLIC_BASE_URL: http://localhost:5000
+      APP_PORT: "5000"
+      APP_PUBLIC_BASE_URL: http://172.16.50.39:5000
       DB_HOST: db
-      DB_PORT: 5432
+      DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-selamnew-collab}
       DB_PASSWORD: ${DB_PASSWORD:-collab_secret}
       REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REDIS_PORT: "6379"
       ELASTICSEARCH_NODE: http://elasticsearch:9200
       ELASTICSEARCH_USERNAME: ""
       ELASTICSEARCH_PASSWORD: ""
-      COLLABORATION_FRONT_URL: http://localhost:3000
+      COLLABORATION_FRONT_URL: http://172.16.50.39:3000
     command:
       [
         "sh",
@@ -127,10 +127,12 @@ services:
       NODE_ENV: development
       PORT: 3001
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_COLLABORATION_URL: http://localhost:5000/api/v1
-      NEXT_PUBLIC_WS_URL: http://localhost:5000
-      NEXT_PUBLIC_API_URL: http://localhost:5000/api/v1
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:5000/api/v1
+      NEXT_PUBLIC_COLLABORATION_URL: http://172.16.50.39:5000/api/v1
+      NEXT_PUBLIC_WS_URL: http://172.16.50.39:5000
+      NEXT_PUBLIC_API_URL: http://172.16.50.39:5000/api/v1
+      NEXT_PUBLIC_API_BASE_URL: http://172.16.50.39:5000/api/v1
+      NEXT_PUBLIC_COLLABORATION_SOCKET_URL: http://172.16.50.39:5000
+      NEXT_PUBLIC_APP_URL: http://172.16.50.39:3000
     command:
       [
         "sh",
