@@ -16,6 +16,18 @@ pipeline {
   }
 
   stages {
+    stage('Why this job ran') {
+      steps {
+        script {
+          def causes = currentBuild.getBuildCauses().collect { it.shortDescription }.join(' | ')
+          echo "BUILD CAUSE: ${causes}"
+          echo "ACTION=${params.ACTION ?: env.ACTION}"
+          echo "Docker image is built ONLY when ACTION is build-and-start or update-from-github."
+          echo "If you did not click this job, check github-push-collaboration (webhook)."
+        }
+      }
+    }
+
     stage('Select Environment') {
       steps {
         sh '''#!/usr/bin/env bash

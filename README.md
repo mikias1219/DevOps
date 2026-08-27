@@ -14,18 +14,21 @@ Production `frontend/Jenkinsfile` is the **stage shape** we copy (select env →
 
 ## Daily learning loop
 
-```
-1. Change app code in backend/ or frontend/  (separate git repos)
-2. git push develop
-3. GitHub webhook → Nginx :80 → github-push-collaboration
-4. That job starts collaboration-backend and/or collaboration-frontend
-5. Stages: Select env → fetch vars → pull → quality → build → push 127.0.0.1:5001 → compose recreate → smoke
+**Default: you click Jenkins.** GitHub does **not** rebuild the app until you set `COLLABORATION_WEBHOOK_DEPLOY=true`.
 
-Change a Jenkinsfile here:
-1. git push main (this DevOps repo)
-2. Webhook → sync-devops-control-plane
-3. git pull /var/devops → bin/sync-jobs.sh → Jenkins job XML updated
-   Do not scp Jenkinsfiles.
+Read **[jenkins/LEARN.md](jenkins/LEARN.md)** for causes, `ACTION`, and why backend used to start on its own.
+
+```
+You (learning):
+  Jenkins → collaboration-backend → Build with Parameters → pick ACTION
+
+You (change a Jenkinsfile in this repo):
+  git push main → sync-devops-control-plane → jobs update (app is NOT rebuilt)
+
+GitHub auto-deploy (opt-in):
+  COLLABORATION_WEBHOOK_DEPLOY=true
+  push backend repo  → collaboration-backend only
+  push frontend repo → collaboration-frontend only
 ```
 
 ---
@@ -51,10 +54,10 @@ portainer/  nginx/       Ops UI + webhook proxy
 
 | Job | Trigger | What it does |
 |---|---|---|
-| `collaboration-backend` | Manual `ACTION` or webhook router | Production-shaped pipeline for the API |
-| `collaboration-frontend` | same | Same for Next |
-| `collaboration-stack` | Manual | start/stop whole compose, or trigger both app jobs |
-| `github-push-collaboration` | GitHub webhook (collab token) | Routes to FE and/or BE `ACTION=update-from-github` |
+| `collaboration-backend` | **You** click Build with Parameters | API pipeline. Image only if ACTION builds. |
+| `collaboration-frontend` | **You** click Build with Parameters | Same for Next |
+| `collaboration-stack` | Manual | start/stop compose; build-and-start runs **both** apps |
+| `github-push-collaboration` | GitHub push on **develop** | Backend repo → backend job; frontend repo → frontend job |
 | `pull-collaboration-now` | Manual | Same as webhook, for a laptop with no public URL |
 | `sync-devops-control-plane` | GitHub webhook (devops token) | Pull this repo + rewrite Jenkins jobs |
 | `apply-vault-env` | Manual / Secrets Room | Vault → `collaboration/env/*.env`; FE image rebuild |
@@ -62,7 +65,7 @@ portainer/  nginx/       Ops UI + webhook proxy
 
 `ACTION`: `start` | `stop` | `restart` | `build-and-start` | `update-from-github`
 
-Quality uses `npx eslint` **without `--fix`** (app `npm run lint` would dirty git). Backend also runs `npm test`. Set `SKIP_QUALITY=true` only as an emergency bypass.
+Quality **reports** eslint/tests and does not fail the lab (app repo is not ours). Image build + smoke are the gate.
 
 ---
 

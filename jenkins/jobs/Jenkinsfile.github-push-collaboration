@@ -11,64 +11,71 @@ pipeline {
   environment {
     DEVOPS_ROOT = '/var/devops'
     ENV_FILE = '/var/devops/collaboration/.env.docker'
+    BACKEND_GITHUB = 'ie-network-solutions/selamnew-collaboration-backend'
+    FRONTEND_GITHUB = 'ie-network-solutions/selamnew-collaboration-fe'
   }
 
   stages {
+    stage('Why this job ran') {
+      steps {
+        script {
+          def causes = currentBuild.getBuildCauses().collect { it.shortDescription }.join(' | ')
+          echo "BUILD CAUSE: ${causes}"
+          echo "Webhook router: GitHub develop push → one app job."
+          echo "  ${env.BACKEND_GITHUB}  → collaboration-backend"
+          echo "  ${env.FRONTEND_GITHUB}  → collaboration-frontend"
+        }
+      }
+    }
+
     stage('Decide') {
       steps {
         script {
           def ref = env.gh_ref ?: ''
-          def repo = (env.gh_repo ?: '').trim()
+          def repo = (env.gh_repo ?: '').trim().toLowerCase()
+          def repoName = (env.gh_repo_name ?: '').trim().toLowerCase()
+          if (!repoName && repo.contains('/')) {
+            repoName = repo.tokenize('/')[-1]
+          }
           echo "gh_ref=${ref}"
           echo "gh_repo=${repo}"
-          echo "gh_after=${env.gh_after ?: ''}"
-
-          def backBranch = sh(
-            script: '''grep '^COLLABORATION_BACKEND_BRANCH=' /var/devops/collaboration/.env.docker | cut -d= -f2- || echo develop''',
-            returnStdout: true
-          ).trim()
-          def feBranch = sh(
-            script: '''grep '^COLLABORATION_FRONTEND_BRANCH=' /var/devops/collaboration/.env.docker | cut -d= -f2- || echo develop''',
-            returnStdout: true
-          ).trim()
+          echo "gh_repo_name=${repoName}"
 
           env.RUN_BACKEND = 'false'
           env.RUN_FRONTEND = 'false'
           env.SKIP_DEPLOY = 'false'
 
-          if (ref && !(ref ==~ /refs\/heads\/.+/)) {
-            echo "Ignoring non-branch ref ${ref}"
+          if (!repo && !repoName) {
+            echo "No GitHub payload (manual Build Now). Webhook-only — not deploying."
             env.SKIP_DEPLOY = 'true'
             return
           }
 
-          def pushed = ref.startsWith('refs/heads/') ? ref.substring('refs/heads/'.length()) : ''
-          if (ref && pushed && pushed != backBranch && pushed != feBranch &&
-              !(pushed in ['develop', 'main', 'master'])) {
-            echo "Ignoring push to ${pushed} (watching backend=${backBranch} frontend=${feBranch})"
+          def pushed = ref.startsWith('refs/heads/') ? ref.substring('refs/heads/'.length()) : ref
+          if (pushed != 'develop') {
+            echo "Ignoring ${ref} — only develop triggers FE/BE."
             env.SKIP_DEPLOY = 'true'
             return
           }
 
-          def repoLower = repo.toLowerCase()
-          if (!repo) {
-            echo "No gh_repo (manual run) — deploying both apps"
+          def isBackend = repo == env.BACKEND_GITHUB || repoName == 'selamnew-collaboration-backend'
+          def isFrontend = repo == env.FRONTEND_GITHUB || repoName == 'selamnew-collaboration-fe'
+
+          if (isBackend && !isFrontend) {
             env.RUN_BACKEND = 'true'
+            echo "develop + backend repo → collaboration-backend (ACTION=update-from-github)"
+          } else if (isFrontend && !isBackend) {
             env.RUN_FRONTEND = 'true'
-          } else if (repoLower.contains('backend') || repoLower.endsWith('-be')) {
-            env.RUN_BACKEND = 'true'
-          } else if (repoLower.contains('frontend') || repoLower.endsWith('-fe') || repoLower.contains('-fe')) {
-            env.RUN_FRONTEND = 'true'
+            echo "Routing → collaboration-frontend (ACTION=update-from-github)"
           } else {
-            echo "Unknown gh_repo=${repo} — deploying both to be safe"
-            env.RUN_BACKEND = 'true'
-            env.RUN_FRONTEND = 'true'
+            echo "Unknown repo '${repo}' / '${repoName}'. Not starting a job."
+            env.SKIP_DEPLOY = 'true'
           }
         }
       }
     }
 
-    stage('Deploy backend') {
+    stage('Backend from GitHub') {
       when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_BACKEND == 'true' } }
       steps {
         build job: 'collaboration-backend',
@@ -81,7 +88,7 @@ pipeline {
       }
     }
 
-    stage('Deploy frontend') {
+    stage('Frontend from GitHub') {
       when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_FRONTEND == 'true' } }
       steps {
         build job: 'collaboration-frontend',
@@ -96,7 +103,7 @@ pipeline {
   }
 
   post {
-    success { echo 'github-push-collaboration done (deployed or skipped)' }
-    failure { echo 'github-push-collaboration failed — see the downstream job console' }
+    success { echo 'Webhook router finished (see Decide for which app, if any)' }
+    failure { echo 'Webhook router failed — open the downstream FE/BE console' }
   }
 }

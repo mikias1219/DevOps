@@ -159,6 +159,8 @@ sync_gwt_job() {
   local jenkinsfile="$2"
   local description="$3"
   local token_file="$4"
+  local filter_text="${5:-}"
+  local filter_expr="${6:-}"
   local out_xml="${OUT_DIR}/job-${job_name}.xml"
   local token="changeme"
 
@@ -176,11 +178,13 @@ sync_gwt_job() {
   local script_b64
   script_b64="$(base64 -w0 "$jenkinsfile")"
 
-  python3 - "$script_b64" "$description" "$token" >"$out_xml" <<'PY'
+  python3 - "$script_b64" "$description" "$token" "$filter_text" "$filter_expr" >"$out_xml" <<'PY'
 import base64, html, sys
 script = base64.b64decode(sys.argv[1]).decode()
 desc = sys.argv[2]
 token = sys.argv[3]
+filter_text = sys.argv[4] if len(sys.argv) > 4 else ""
+filter_expr = sys.argv[5] if len(sys.argv) > 5 else ""
 esc = html.escape(script)
 desc_esc = html.escape(desc.encode("ascii", "replace").decode("ascii"))
 token_esc = html.escape(token)
@@ -216,9 +220,16 @@ print(f"""<?xml version='1.1' encoding='UTF-8'?>
               <regexpFilter></regexpFilter>
               <defaultValue></defaultValue>
             </org.jenkinsci.plugins.gwt.GenericVariable>
+            <org.jenkinsci.plugins.gwt.GenericVariable>
+              <expressionType>JSONPath</expressionType>
+              <key>gh_repo_name</key>
+              <value>$.repository.name</value>
+              <regexpFilter></regexpFilter>
+              <defaultValue></defaultValue>
+            </org.jenkinsci.plugins.gwt.GenericVariable>
           </genericVariables>
-          <regexpFilterText></regexpFilterText>
-          <regexpFilterExpression></regexpFilterExpression>
+          <regexpFilterText>{html.escape(filter_text)}</regexpFilterText>
+          <regexpFilterExpression>{html.escape(filter_expr)}</regexpFilterExpression>
           <printContributedVariables>true</printContributedVariables>
           <printPostContent>false</printPostContent>
           <causeString>GitHub push webhook ($gh_repo $gh_ref)</causeString>
@@ -346,8 +357,10 @@ sync_gwt_job "sync-devops-control-plane" \
 
 sync_gwt_job "github-push-collaboration" \
   "$JOBS_DIR/Jenkinsfile.github-push-collaboration" \
-  "GitHub push to Collaboration FE/BE → quality, image, deploy the changed app." \
-  "$SECRETS_DIR/github-webhook-collab-token.txt"
+  "GitHub webhook: push to develop on FE or BE repo starts that one Jenkins job." \
+  "$SECRETS_DIR/github-webhook-collab-token.txt" \
+  '$gh_ref' \
+  'refs/heads/develop'
 
 rm -f "$COOKIE_JAR"
 echo
