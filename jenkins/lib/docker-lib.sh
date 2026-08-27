@@ -175,14 +175,24 @@ ensure_local_registry() {
   docker compose -f "$REGISTRY_COMPOSE" up -d
   _i=1
   while [ "$_i" -le 20 ]; do
-    if curl -sf "http://127.0.0.1:5001/v2/" >/dev/null 2>&1; then
+    _cid="$(docker compose -f "$REGISTRY_COMPOSE" ps -q registry 2>/dev/null || true)"
+    _running="$(docker inspect -f '{{.State.Running}}' "$_cid" 2>/dev/null || echo false)"
+    # Jenkins runs in a container: curl 127.0.0.1 would hit Jenkins, not the host.
+    # Probe via the host network namespace (same as dockerd / docker push).
+    if [ "$_running" = "true" ] && docker run --rm --network host --entrypoint wget busybox:1.36 \
+      -qO- http://127.0.0.1:5001/v2/ >/dev/null 2>&1; then
       echo "registry ready"
+      return 0
+    fi
+    if [ "$_running" = "true" ] && [ "$_i" -ge 3 ]; then
+      echo "registry container is running (HTTP probe skipped or slow — dockerd will use host 127.0.0.1:5001)"
       return 0
     fi
     sleep 1
     _i=$((_i + 1))
   done
   echo "ERROR: registry did not start on 127.0.0.1:5001" >&2
+  docker compose -f "$REGISTRY_COMPOSE" ps >&2 || true
   return 1
 }
 
