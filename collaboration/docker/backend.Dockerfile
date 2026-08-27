@@ -1,4 +1,4 @@
-# Production backend — all packages installed inside Docker.
+# Collaboration backend image owned by docker-devops (do not use the app-repo Dockerfile).
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
@@ -10,6 +10,8 @@ FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN rm -rf node_modules
+COPY --from=deps /app/node_modules ./node_modules
 RUN npm run build
 
 FROM node:20-bookworm-slim AS runner

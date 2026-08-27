@@ -4,15 +4,13 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
+    timeout(time: 20, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '40'))
   }
 
   environment {
     DEVOPS_ROOT = '/var/devops'
     DEVOPS_BRANCH = 'main'
-    // Host path for docker -v (inside Jenkins, /var/devops is a container mount)
-    DEVOPS_HOST_PATH = '/home/ienetworks/workspace/tools/docker-devops'
-    JENKINS_URL_INTERNAL = 'http://127.0.0.1:8080'
   }
 
   stages {
@@ -36,7 +34,8 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          . /var/devops/jenkins/docker-lib.sh
+          . /var/devops/jenkins/lib/docker-lib.sh
+          . /var/devops/jenkins/lib/ci-lib.sh
 
           ROOT="${DEVOPS_ROOT}"
           BRANCH="${DEVOPS_BRANCH}"
@@ -50,6 +49,7 @@ pipeline {
           if [ -n "${dirty}" ]; then
             echo "FATAL: DevOps working tree has local tracked modifications:" >&2
             echo "${dirty}" >&2
+            echo "Commit or stash on the server, then re-run. Never scp Jenkinsfiles." >&2
             exit 1
           fi
 
@@ -72,27 +72,21 @@ pipeline {
             . /var/devops/jenkins/secrets/admin.env
             set +a
           fi
-          # Mount the HOST devops path (not /var/devops — that path does not exist on the host)
-          docker run --rm --network host \
-            -v "${DEVOPS_HOST_PATH}:/var/devops:rw" \
-            -e JENKINS_URL=http://127.0.0.1:8080 \
-            -e JENKINS_ADMIN_USER="${JENKINS_ADMIN_USER:-admin}" \
-            -e JENKINS_ADMIN_PASS="${JENKINS_ADMIN_PASS:-}" \
-            python:3.12-bookworm \
-            bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null && bash /var/devops/jenkins/sync-jobs.sh'
+          export JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:8080}"
+          bash /var/devops/jenkins/bin/sync-jobs.sh
         '''
       }
     }
 
-    stage('Refresh Jenkins compose if needed') {
+    stage('Refresh Jenkins compose') {
       when { expression { return env.SKIP_SYNC != 'true' } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          if [ -f "${DEVOPS_HOST_PATH}/jenkins/docker-compose.yml" ]; then
-            echo "==> Ensuring jenkins compose stack is up"
-            docker compose -f "${DEVOPS_HOST_PATH}/jenkins/docker-compose.yml" up -d
-          fi
+          . /var/devops/jenkins/lib/ci-lib.sh
+          HOST="$(resolve_host_devops)"
+          echo "==> Ensuring jenkins compose is up (host=${HOST})"
+          docker compose -f "${HOST}/jenkins/docker-compose.yml" up -d
         '''
       }
     }
@@ -100,10 +94,10 @@ pipeline {
 
   post {
     success {
-      echo 'Done (sync ran or intentionally skipped for non-main branch).'
+      echo 'Done (sync ran or intentionally skipped for a non-main branch).'
     }
     failure {
-      echo 'Sync failed — check Console Output. Do not scp Jenkinsfiles; fix git state and re-run.'
+      echo 'Sync failed — check Console Output. Do not scp Jenkinsfiles; fix git and re-run.'
     }
   }
 }

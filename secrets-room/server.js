@@ -23,9 +23,6 @@ const JENKINS_PASS = process.env.JENKINS_ADMIN_PASS || '';
 const COLLAB_SOURCE =
   process.env.COLLABORATION_SOURCE ||
   '/home/ienetworks/workspace/company/SelamnewCollaboration';
-const HOUSEKEEPER_SOURCE =
-  process.env.HOUSEKEEPER_SOURCE ||
-  '/home/mikias/workspace/personal/my personal project/lifeos';
 
 /** Project registry: each project has multiple env files (Vault path + disk path). */
 const PROJECTS = {
@@ -62,24 +59,6 @@ const PROJECTS = {
         exampleFile: path.join(DEVOPS_ROOT, 'collaboration/.env.docker.example'),
         envFile: path.join(DEVOPS_ROOT, 'collaboration/.env.docker'),
         applyTarget: 'both',
-      },
-    },
-  },
-  housekeeper: {
-    id: 'housekeeper',
-    label: 'Housekeeper',
-    description: 'LifeOS / Housekeeper personal stack',
-    accent: '#818cf8',
-    applyTarget: 'housekeeper',
-    envFiles: {
-      compose: {
-        id: 'compose',
-        label: 'Compose',
-        subtitle: 'Docker stack configuration',
-        vaultPath: 'secret/data/housekeeper/compose',
-        exampleFile: path.join(DEVOPS_ROOT, 'housekeeper/.env.docker.example'),
-        envFile: path.join(DEVOPS_ROOT, 'housekeeper/.env.docker'),
-        applyTarget: 'housekeeper',
       },
     },
   },
@@ -480,7 +459,6 @@ app.get('/api/health', (_req, res) => {
     vaultAddr: VAULT_ADDR,
     hasToken: Boolean(VAULT_TOKEN),
     collabSource: COLLAB_SOURCE,
-    housekeeperSource: HOUSEKEEPER_SOURCE,
     devopsRoot: DEVOPS_ROOT,
   });
 });

@@ -1,0 +1,17 @@
+# Local image registry for the Collaboration lab (not Docker Hub).
+# Bound to localhost only — no daemon.json / Docker restart required.
+name: devops-registry
+
+services:
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - registry_data:/var/lib/registry
+
+volumes:
+  registry_data:

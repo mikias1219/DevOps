@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop all DevOps project stacks (keeps volumes/data).
+# Stop stacks. Volumes and the local registry stay unless you pass --with-registry.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -7,13 +7,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "==> Stopping Collaboration"
 docker compose -f "$ROOT/collaboration/docker-compose.yml" --env-file "$ROOT/collaboration/.env.docker" down 2>/dev/null || true
 
-echo "==> Stopping Housekeeper"
-docker compose -f "$ROOT/housekeeper/docker-compose.yml" --env-file "$ROOT/housekeeper/.env.docker" down 2>/dev/null || true
-
 echo "==> Stopping Jenkins"
 docker compose -f "$ROOT/jenkins/docker-compose.yml" down 2>/dev/null || true
 
 echo "==> Stopping Portainer"
 docker compose -f "$ROOT/portainer/docker-compose.yml" down 2>/dev/null || true
 
-echo "Done. Data volumes preserved."
+if [[ "${1:-}" == "--with-registry" ]]; then
+  echo "==> Stopping registry"
+  docker compose -f "$ROOT/registry/docker-compose.yml" down 2>/dev/null || true
+fi
+
+echo "Done. Named volumes were not deleted."

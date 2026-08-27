@@ -4,27 +4,8 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
+    timeout(time: 40, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '20'))
-  }
-
-  parameters {
-    choice(
-      name: 'REPO',
-      choices: [
-        'collaboration-backend',
-        'collaboration-frontend',
-        'collaboration-both',
-        'housekeeper-backend',
-        'housekeeper-frontend',
-        'housekeeper-both',
-      ],
-      description: 'Which GitHub repo the watcher should follow',
-    )
-    booleanParam(
-      name: 'REBUILD_NOW',
-      defaultValue: true,
-      description: 'After switching, pull that branch and recreate the container',
-    )
   }
 
   stages {
@@ -34,7 +15,7 @@ pipeline {
           def listed = sh(
             script: """#!/usr/bin/env bash
               set -euo pipefail
-              . /var/devops/jenkins/docker-lib.sh
+              . /var/devops/jenkins/lib/docker-lib.sh
               echo "CURRENT=\$(current_watch_branch '${params.REPO}')"
               echo "DIR=\$(target_source_dir '${params.REPO}')"
               list_github_branches "\$(target_source_dir '${params.REPO}')"
@@ -65,7 +46,6 @@ pipeline {
           }
 
           echo "Currently watching: ${current ?: '(none)'}"
-          echo "Select a branch in the Jenkins input form (Paused for input)."
 
           timeout(time: 30, unit: 'MINUTES') {
             def chosen = input(
@@ -85,14 +65,41 @@ pipeline {
       }
     }
 
-    stage('Switch watch + rebuild') {
+    stage('Switch watch') {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          . /var/devops/jenkins/docker-lib.sh
+          . /var/devops/jenkins/lib/docker-lib.sh
           echo "REPO=${REPO} BRANCH=${SELECTED_BRANCH} REBUILD_NOW=${REBUILD_NOW}"
           switch_watch_target "${REPO}" "${SELECTED_BRANCH}" "${REBUILD_NOW}"
         '''
+      }
+    }
+
+    stage('Rebuild if requested') {
+      when { expression { return params.REBUILD_NOW != false && env.SELECTED_BRANCH } }
+      steps {
+        script {
+          def repo = params.REPO
+          if (repo == 'collaboration-backend' || repo == 'collaboration-both') {
+            build job: 'collaboration-backend',
+              wait: true,
+              propagate: true,
+              parameters: [
+                string(name: 'ACTION', value: 'update-from-github'),
+                booleanParam(name: 'SKIP_QUALITY', value: false)
+              ]
+          }
+          if (repo == 'collaboration-frontend' || repo == 'collaboration-both') {
+            build job: 'collaboration-frontend',
+              wait: true,
+              propagate: true,
+              parameters: [
+                string(name: 'ACTION', value: 'update-from-github'),
+                booleanParam(name: 'SKIP_QUALITY', value: false)
+              ]
+          }
+        }
       }
     }
   }

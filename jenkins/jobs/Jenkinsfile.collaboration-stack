@@ -1,0 +1,83 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    DEVOPS_ROOT = '/var/devops'
+    COMPOSE_FILE = '/var/devops/collaboration/docker-compose.yml'
+    ENV_FILE = '/var/devops/collaboration/.env.docker'
+  }
+
+  stages {
+    stage('Select Environment') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          echo "ACTION=${ACTION}"
+          print_environment
+        '''
+      }
+    }
+
+    stage('Control stack') {
+      when { expression { return ['start', 'stop', 'restart'].contains(env.ACTION) } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          case "${ACTION}" in
+            start)
+              ensure_local_registry
+              ensure_collaboration_infra
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+              ;;
+            stop)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop
+              ;;
+            restart)
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop || true
+              ensure_local_registry
+              ensure_collaboration_infra
+              docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+              ;;
+          esac
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+        '''
+      }
+    }
+
+    stage('Build and deploy apps') {
+      when { expression { return ['build-and-start', 'update-from-github'].contains(env.ACTION) } }
+      steps {
+        script {
+          build job: 'collaboration-backend',
+            wait: true,
+            propagate: true,
+            parameters: [
+              string(name: 'ACTION', value: env.ACTION),
+              booleanParam(name: 'SKIP_QUALITY', value: false)
+            ]
+          build job: 'collaboration-frontend',
+            wait: true,
+            propagate: true,
+            parameters: [
+              string(name: 'ACTION', value: env.ACTION),
+              booleanParam(name: 'SKIP_QUALITY', value: false)
+            ]
+        }
+      }
+    }
+  }
+
+  post {
+    success { echo "OK collaboration-stack ACTION=${env.ACTION}" }
+    failure { echo 'collaboration-stack failed — see Console Output' }
+  }
+}

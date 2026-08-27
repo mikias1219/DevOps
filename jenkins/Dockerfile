@@ -18,6 +18,8 @@ RUN apt-get update \
     docker-ce-cli \
     docker-compose-plugin \
     git \
+    python3 \
+    python3-minimal \
   && rm -rf /var/lib/apt/lists/*
 
 USER jenkins

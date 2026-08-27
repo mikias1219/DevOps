@@ -85,22 +85,10 @@ path "secret/metadata/collaboration" {
 path "secret/metadata/collaboration/" {
   capabilities = ["list"]
 }
-path "secret/metadata/housekeeper" {
-  capabilities = ["list"]
-}
-path "secret/metadata/housekeeper/" {
-  capabilities = ["list"]
-}
 path "secret/data/collaboration/*" {
   capabilities = ["create", "read", "update", "patch", "delete", "list"]
 }
 path "secret/metadata/collaboration/*" {
-  capabilities = ["list", "read", "update", "delete"]
-}
-path "secret/data/housekeeper/*" {
-  capabilities = ["create", "read", "update", "patch", "delete", "list"]
-}
-path "secret/metadata/housekeeper/*" {
   capabilities = ["list", "read", "update", "delete"]
 }
 EOF
@@ -141,7 +129,6 @@ chmod 600 "$SECRETS_DIR/vault-approle.env"
 "$VAULT_BIN" kv put secret/collaboration/backend _seed=true >/dev/null || true
 "$VAULT_BIN" kv put secret/collaboration/frontend _seed=true >/dev/null || true
 "$VAULT_BIN" kv put secret/collaboration/compose _seed=true >/dev/null || true
-"$VAULT_BIN" kv put secret/housekeeper/compose _seed=true >/dev/null || true
 
 cat >"$SECRETS_DIR/operator-login.txt" <<EOF
 Vault UI:  ${ADDR}/ui

@@ -1,4 +1,6 @@
 .watch-state/
+jenkins/.env
+jenkins/job-*.xml
 
 # Local machine env (copy from *.example)
 .env

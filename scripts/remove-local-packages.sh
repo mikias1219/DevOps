@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Remove local node_modules — use Docker/Jenkins only.
+# Remove local node_modules — apps run from Docker images.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HK="$(grep '^HOUSEKEEPER_SOURCE=' "$ROOT/housekeeper/.env.docker" | cut -d= -f2-)"
 COL="$(grep '^COLLABORATION_SOURCE=' "$ROOT/collaboration/.env.docker" | cut -d= -f2-)"
 
 remove_nm() {
@@ -14,13 +13,7 @@ remove_nm() {
   fi
 }
 
-remove_nm "$HK/backend"
-remove_nm "$HK/frontend"
 remove_nm "$COL/backend"
 remove_nm "$COL/frontend"
-remove_nm "$COL/mobile" 2>/dev/null || true
 
-echo
-echo "Local node_modules removed. Run apps only via:"
-echo "  Jenkins → Build with Parameters → ACTION=start | update-from-github"
-echo "  or: ./scripts/start-all.sh"
+echo "Local node_modules removed. Deploy via Jenkins ACTION=build-and-start."

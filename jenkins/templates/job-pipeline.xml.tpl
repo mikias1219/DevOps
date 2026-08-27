@@ -7,24 +7,19 @@
     <hudson.model.ParametersDefinitionProperty>
       <parameterDefinitions>
         <hudson.model.ChoiceParameterDefinition>
-          <name>REPO</name>
-          <description>Which GitHub repo the watcher should follow</description>
+          <name>ACTION</name>
+          <description>Pipeline action (same names as daily ops)</description>
           <choices class="java.util.Arrays$ArrayList">
             <a class="string-array">
-              <string>collaboration-backend</string>
-              <string>collaboration-frontend</string>
-              <string>collaboration-both</string>
-              <string>housekeeper-backend</string>
-              <string>housekeeper-frontend</string>
-              <string>housekeeper-both</string>
+              <string>start</string>
+              <string>stop</string>
+              <string>restart</string>
+              <string>build-and-start</string>
+              <string>update-from-github</string>
             </a>
           </choices>
         </hudson.model.ChoiceParameterDefinition>
-        <hudson.model.BooleanParameterDefinition>
-          <name>REBUILD_NOW</name>
-          <description>After switching, pull that branch and recreate the container</description>
-          <defaultValue>true</defaultValue>
-        </hudson.model.BooleanParameterDefinition>
+        __EXTRA_PARAMS__
       </parameterDefinitions>
     </hudson.model.ParametersDefinitionProperty>
   </properties>

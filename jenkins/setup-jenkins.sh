@@ -89,7 +89,7 @@ done
 
 echo "==> Syncing Jenkins jobs"
 JENKINS_ADMIN_USER="$JENKINS_ADMIN_USER" JENKINS_ADMIN_PASS="$JENKINS_ADMIN_PASS" \
-  "$ROOT/jenkins/sync-jobs.sh"
+  "$ROOT/jenkins/bin/sync-jobs.sh"
 
 echo
 echo "============================================"

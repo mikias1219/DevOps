@@ -1,6 +1,8 @@
-# Jenkins for DevOps learning — builds Housekeeper + Collaboration via host Docker
-# Usage:
-#   cp ../.env.example ../.env   (set DOCKER_GID)
+# Jenkins controller for the Collaboration DevOps lab.
+# Talks to the *host* Docker engine (docker.sock). It does not run Nest/Next.
+#
+#   export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+#   cp .env.example .env   # set COLLABORATION_SOURCE
 #   docker compose up -d --build
 
 name: jenkins
@@ -26,9 +28,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ..:/var/devops:rw
       - ./init.groovy.d:/usr/share/jenkins/ref/init.groovy.d:ro
-      - /home/mikias/workspace/company/SelamnewCollaboration:/home/mikias/workspace/company/SelamnewCollaboration:rw
-      - "/home/mikias/workspace/personal/my personal project/lifeos:/home/mikias/workspace/personal/my personal project/lifeos:rw"
-      - /home/mikias/.ssh:/var/jenkins_home/.ssh-host:ro
+      - ${COLLABORATION_SOURCE:-/home/mikias/workspace/company/SelamnewCollaboration}:${COLLABORATION_SOURCE:-/home/mikias/workspace/company/SelamnewCollaboration}:rw
+      - ${HOME}/.ssh:/var/jenkins_home/.ssh-host:ro
       - ./secrets:/var/devops/jenkins/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/login >/dev/null || exit 1"]
@@ -36,12 +37,6 @@ services:
       timeout: 5s
       retries: 15
       start_period: 60s
-
-  # github-watch disabled until GitHub webhook is implemented.
-  # Use Jenkins job pull-collaboration-now for manual pulls from develop.
-  # github-watch:
-  #   image: devops-jenkins:local
-  #   ...
 
 volumes:
   jenkins_home:

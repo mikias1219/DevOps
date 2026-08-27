@@ -1,0 +1,102 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 50, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '40'))
+  }
+
+  environment {
+    DEVOPS_ROOT = '/var/devops'
+    ENV_FILE = '/var/devops/collaboration/.env.docker'
+  }
+
+  stages {
+    stage('Decide') {
+      steps {
+        script {
+          def ref = env.gh_ref ?: ''
+          def repo = (env.gh_repo ?: '').trim()
+          echo "gh_ref=${ref}"
+          echo "gh_repo=${repo}"
+          echo "gh_after=${env.gh_after ?: ''}"
+
+          def backBranch = sh(
+            script: '''grep '^COLLABORATION_BACKEND_BRANCH=' /var/devops/collaboration/.env.docker | cut -d= -f2- || echo develop''',
+            returnStdout: true
+          ).trim()
+          def feBranch = sh(
+            script: '''grep '^COLLABORATION_FRONTEND_BRANCH=' /var/devops/collaboration/.env.docker | cut -d= -f2- || echo develop''',
+            returnStdout: true
+          ).trim()
+
+          env.RUN_BACKEND = 'false'
+          env.RUN_FRONTEND = 'false'
+          env.SKIP_DEPLOY = 'false'
+
+          if (ref && !(ref ==~ /refs\/heads\/.+/)) {
+            echo "Ignoring non-branch ref ${ref}"
+            env.SKIP_DEPLOY = 'true'
+            return
+          }
+
+          def pushed = ref.startsWith('refs/heads/') ? ref.substring('refs/heads/'.length()) : ''
+          if (ref && pushed && pushed != backBranch && pushed != feBranch &&
+              !(pushed in ['develop', 'main', 'master'])) {
+            echo "Ignoring push to ${pushed} (watching backend=${backBranch} frontend=${feBranch})"
+            env.SKIP_DEPLOY = 'true'
+            return
+          }
+
+          def repoLower = repo.toLowerCase()
+          if (!repo) {
+            echo "No gh_repo (manual run) — deploying both apps"
+            env.RUN_BACKEND = 'true'
+            env.RUN_FRONTEND = 'true'
+          } else if (repoLower.contains('backend') || repoLower.endsWith('-be')) {
+            env.RUN_BACKEND = 'true'
+          } else if (repoLower.contains('frontend') || repoLower.endsWith('-fe') || repoLower.contains('-fe')) {
+            env.RUN_FRONTEND = 'true'
+          } else {
+            echo "Unknown gh_repo=${repo} — deploying both to be safe"
+            env.RUN_BACKEND = 'true'
+            env.RUN_FRONTEND = 'true'
+          }
+        }
+      }
+    }
+
+    stage('Deploy backend') {
+      when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_BACKEND == 'true' } }
+      steps {
+        build job: 'collaboration-backend',
+          wait: true,
+          propagate: true,
+          parameters: [
+            string(name: 'ACTION', value: 'update-from-github'),
+            booleanParam(name: 'SKIP_QUALITY', value: false)
+          ]
+      }
+    }
+
+    stage('Deploy frontend') {
+      when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_FRONTEND == 'true' } }
+      steps {
+        build job: 'collaboration-frontend',
+          wait: true,
+          propagate: true,
+          parameters: [
+            string(name: 'ACTION', value: 'update-from-github'),
+            booleanParam(name: 'SKIP_QUALITY', value: false)
+          ]
+      }
+    }
+  }
+
+  post {
+    success { echo 'github-push-collaboration done (deployed or skipped)' }
+    failure { echo 'github-push-collaboration failed — see the downstream job console' }
+  }
+}

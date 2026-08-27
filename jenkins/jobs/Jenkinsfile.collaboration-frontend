@@ -1,0 +1,134 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 40, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '30'))
+  }
+
+  environment {
+    DEVOPS_ROOT = '/var/devops'
+    COMPOSE_FILE = '/var/devops/collaboration/docker-compose.yml'
+    ENV_FILE = '/var/devops/collaboration/.env.docker'
+    SERVICE = 'frontend'
+  }
+
+  stages {
+    stage('Select Environment') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          echo "ACTION=${ACTION}"
+          echo "SKIP_QUALITY=${SKIP_QUALITY:-false}"
+          print_environment
+        '''
+      }
+    }
+
+    stage('Fetch Application Variables') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          SOURCE="$(collaboration_source)"
+          echo "SOURCE=${SOURCE}"
+          echo "BRANCH=$(frontend_branch)"
+          echo "DOCKERFILE=${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile"
+          echo "IMAGE=$(registry_host)/collaboration-frontend"
+          test -d "${SOURCE}/frontend" || { echo "Missing frontend source at ${SOURCE}/frontend" >&2; exit 1; }
+        '''
+      }
+    }
+
+    stage('Prepare Repository') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          ensure_local_registry
+        '''
+      }
+    }
+
+    stage('Pull Latest Changes') {
+      when { expression { return env.ACTION == 'update-from-github' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          git_pull_repo "$(collaboration_source)/frontend" "$(frontend_branch)"
+        '''
+      }
+    }
+
+    stage('Quality') {
+      when {
+        expression {
+          return !['start', 'stop', 'restart'].contains(env.ACTION) && env.SKIP_QUALITY != 'true'
+        }
+      }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          quality_collaboration_frontend
+        '''
+      }
+    }
+
+    stage('Build and Push Docker Image') {
+      when { expression { return !['start', 'stop', 'restart'].contains(env.ACTION) } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          build_and_push_collaboration_frontend
+        '''
+      }
+    }
+
+    stage('Deploy Service') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          case "${ACTION}" in
+            stop)
+              stop_collaboration_service "${SERVICE}"
+              ;;
+            start|restart|build-and-start|update-from-github)
+              deploy_collaboration_service "${SERVICE}"
+              ;;
+            *)
+              echo "Unknown ACTION=${ACTION}" >&2
+              exit 1
+              ;;
+          esac
+        '''
+      }
+    }
+
+    stage('Verify Deployment') {
+      when { expression { return env.ACTION != 'stop' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          wait_collaboration_frontend_smoke "${SERVICE}"
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} ACTION=${env.ACTION}"
+    }
+    failure {
+      echo 'Failed — open Console Output. Fix git in the DevOps repo; do not scp Jenkinsfiles.'
+    }
+  }
+}
