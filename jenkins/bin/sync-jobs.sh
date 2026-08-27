@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Create/update Jenkins pipeline jobs from Jenkinsfiles in this repo.
-# Source of truth = GitHub DevOps. Run after git pull, or via job
-# sync-devops-control-plane (GitHub webhook).
+# Register the six Collaboration jobs from jenkins/jobs/*.
+# Jobs: collaboration-backend, collaboration-frontend, collaboration-stack,
+#       github-push-collaboration, sync-devops-control-plane, apply-vault-env
+# Source of truth = GitHub. Run after git pull, or via sync-devops-control-plane.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -306,11 +307,13 @@ PY
   post_job_xml "$job_name" "$out_xml"
 }
 
-echo "==> Removing retired jobs (housekeeper + github poller)"
+echo "==> Removing retired jobs"
 delete_job "housekeeper-stack"
 delete_job "housekeeper-backend"
 delete_job "housekeeper-frontend"
 delete_job "watch-github"
+delete_job "pull-collaboration-now"
+delete_job "switch-watch-branch"
 
 SKIP_QUALITY_PARAM='<hudson.model.BooleanParameterDefinition>
           <name>SKIP_QUALITY</name>
@@ -332,23 +335,11 @@ sync_job "collaboration-frontend" \
   "Collaboration frontend — quality, image build/push, deploy, smoke" \
   "$SKIP_QUALITY_PARAM"
 
-sync_choice_job "pull-collaboration-now" \
-  "$JOBS_DIR/Jenkinsfile.pull-collaboration-now" \
-  "Pull Collaboration from GitHub NOW. Manual — no webhook required." \
-  "TARGET" \
-  "both,backend,frontend"
-
 sync_choice_job "apply-vault-env" \
   "$JOBS_DIR/Jenkinsfile.apply-vault-env" \
   "Export Vault KV to collaboration/env/*.env then recreate/rebuild apps." \
   "TARGET" \
   "both,backend,frontend"
-
-sync_choice_job "switch-watch-branch" \
-  "$JOBS_DIR/Jenkinsfile.switch-watch-branch" \
-  "Change which GitHub branch Collaboration FE/BE watch, then optionally rebuild." \
-  "REPO" \
-  "collaboration-backend,collaboration-frontend,collaboration-both"
 
 sync_gwt_job "sync-devops-control-plane" \
   "$JOBS_DIR/Jenkinsfile.sync-devops-control-plane" \

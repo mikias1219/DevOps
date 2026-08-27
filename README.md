@@ -14,9 +14,9 @@ Production `frontend/Jenkinsfile` is the **stage shape** we copy (select env →
 
 ## Daily learning loop
 
-**Default: you click Jenkins.** GitHub does **not** rebuild the app until you set `COLLABORATION_WEBHOOK_DEPLOY=true`.
+You click Jenkins to learn. GitHub **develop** pushes also start the matching app job (see `jenkins/README.md`).
 
-Read **[jenkins/LEARN.md](jenkins/LEARN.md)** for causes, `ACTION`, and why backend used to start on its own.
+Jenkins layout and jobs: **[jenkins/README.md](jenkins/README.md)**.
 
 ```
 You (learning):
@@ -25,8 +25,7 @@ You (learning):
 You (change a Jenkinsfile in this repo):
   git push main → sync-devops-control-plane → jobs update (app is NOT rebuilt)
 
-GitHub auto-deploy (opt-in):
-  COLLABORATION_WEBHOOK_DEPLOY=true
+GitHub (develop):
   push backend repo  → collaboration-backend only
   push frontend repo → collaboration-frontend only
 ```
@@ -38,12 +37,11 @@ GitHub auto-deploy (opt-in):
 ```
 collaboration/          Compose + docker-devops-owned Dockerfiles + env/
 registry/               Local registry :5001 (Build+Push practice)
-jenkins/
-  jobs/                 Jenkinsfiles (source of truth)
-  lib/docker-lib.sh     git / quality / build / deploy / smoke
-  bin/sync-jobs.sh       Registers jobs from jobs/*.  Deletes housekeeper jobs.
+jenkins/                See jenkins/README.md
+  jobs/                 Six pipelines (source of truth)
+  lib/                  Shared bash for every job
+  bin/                  sync-jobs.sh, setup, trigger
   templates/            Job XML skeletons
-jenkins/sync-jobs.sh    Shim (old webhook job still calls this path)
 vault/  secrets-room/    Secrets on the server
 portainer/  nginx/       Ops UI + webhook proxy
 ```
@@ -58,10 +56,8 @@ portainer/  nginx/       Ops UI + webhook proxy
 | `collaboration-frontend` | **You** click Build with Parameters | Same for Next |
 | `collaboration-stack` | Manual | start/stop compose; build-and-start runs **both** apps |
 | `github-push-collaboration` | GitHub push on **develop** | Backend repo → backend job; frontend repo → frontend job |
-| `pull-collaboration-now` | Manual | Same as webhook, for a laptop with no public URL |
 | `sync-devops-control-plane` | GitHub webhook (devops token) | Pull this repo + rewrite Jenkins jobs |
 | `apply-vault-env` | Manual / Secrets Room | Vault → `collaboration/env/*.env`; FE image rebuild |
-| `switch-watch-branch` | Manual | Change watched git branch (Collaboration only) |
 
 `ACTION`: `start` | `stop` | `restart` | `build-and-start` | `update-from-github`
 
@@ -80,8 +76,8 @@ cp collaboration/.env.docker.example collaboration/.env.docker   # set COLLABORA
 
 On the server, GitHub webhooks must already point at:
 
-- `http://<host>/generic-webhook-trigger/invoke?token=<devops-token>` → `sync-devops-control-plane`
-- `http://<host>/generic-webhook-trigger/invoke?token=<collab-token>` → `github-push-collaboration`
+- `http://<host>:8080/generic-webhook-trigger/invoke?token=<devops-token>` → `sync-devops-control-plane`
+- `http://<host>:8080/generic-webhook-trigger/invoke?token=<collab-token>` → `github-push-collaboration`
 
 Do **not** rotate those token files unless you also update GitHub.
 
