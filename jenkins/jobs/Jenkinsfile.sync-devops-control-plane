@@ -73,7 +73,8 @@ pipeline {
             set +a
           fi
           export JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:8080}"
-          bash /var/devops/jenkins/bin/sync-jobs.sh
+          . /var/devops/jenkins/lib/ci-lib.sh
+          run_sync_jobs
         '''
       }
     }

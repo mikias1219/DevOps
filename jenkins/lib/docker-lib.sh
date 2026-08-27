@@ -298,6 +298,17 @@ build_and_push_collaboration_frontend() {
   _api_base="$(_frontend_public_arg NEXT_PUBLIC_API_BASE_URL http://172.16.50.39:5000/api/v1)"
   _sock="$(_frontend_public_arg NEXT_PUBLIC_COLLABORATION_SOCKET_URL http://172.16.50.39:5000)"
   _app="$(_frontend_public_arg NEXT_PUBLIC_APP_URL http://172.16.50.39:3000)"
+  _fb_key="$(_frontend_public_arg NEXT_PUBLIC_API_KEY "")"
+  _fb_domain="$(_frontend_public_arg NEXT_PUBLIC_AUTH_DOMAIN "")"
+  _fb_project="$(_frontend_public_arg NEXT_PUBLIC_PROJECT_ID "")"
+  _fb_bucket="$(_frontend_public_arg NEXT_PUBLIC_STORAGE_BUCKET "")"
+  _fb_sender="$(_frontend_public_arg NEXT_PUBLIC_MESSAGE_SENDER_ID "")"
+  _fb_app="$(_frontend_public_arg NEXT_PUBLIC_APP_ID "")"
+  if [ -z "$_fb_key" ]; then
+    echo "FATAL: NEXT_PUBLIC_API_KEY is empty in collaboration/env/frontend.env" >&2
+    echo "Next.js prerender calls Firebase at build time. Add the key (do not commit it)." >&2
+    return 1
+  fi
   ensure_local_registry
   echo "==> docker build ${_image}:${_sha}"
   # Classic builder: this host may not have the buildx plugin.
@@ -309,6 +320,12 @@ build_and_push_collaboration_frontend() {
     --build-arg "NEXT_PUBLIC_API_BASE_URL=${_api_base}" \
     --build-arg "NEXT_PUBLIC_COLLABORATION_SOCKET_URL=${_sock}" \
     --build-arg "NEXT_PUBLIC_APP_URL=${_app}" \
+    --build-arg "NEXT_PUBLIC_API_KEY=${_fb_key}" \
+    --build-arg "NEXT_PUBLIC_AUTH_DOMAIN=${_fb_domain}" \
+    --build-arg "NEXT_PUBLIC_PROJECT_ID=${_fb_project}" \
+    --build-arg "NEXT_PUBLIC_STORAGE_BUCKET=${_fb_bucket}" \
+    --build-arg "NEXT_PUBLIC_MESSAGE_SENDER_ID=${_fb_sender}" \
+    --build-arg "NEXT_PUBLIC_APP_ID=${_fb_app}" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
     "$_src"
