@@ -261,7 +261,8 @@ build_and_push_collaboration_backend() {
   _image="${_reg}/collaboration-backend"
   ensure_local_registry
   echo "==> docker build ${_image}:${_sha}"
-  DOCKER_BUILDKIT=1 docker build \
+  # Classic builder: this host may not have the buildx plugin.
+  DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/backend.Dockerfile" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
@@ -287,7 +288,8 @@ build_and_push_collaboration_frontend() {
   _app="$(_frontend_public_arg NEXT_PUBLIC_APP_URL http://172.16.50.39:3000)"
   ensure_local_registry
   echo "==> docker build ${_image}:${_sha}"
-  DOCKER_BUILDKIT=1 docker build \
+  # Classic builder: this host may not have the buildx plugin.
+  DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile" \
     --build-arg "NEXT_PUBLIC_COLLABORATION_URL=${_api_v1}" \
     --build-arg "NEXT_PUBLIC_WS_URL=${_ws}" \
