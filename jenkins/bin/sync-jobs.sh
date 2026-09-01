@@ -307,38 +307,26 @@ PY
   post_job_xml "$job_name" "$out_xml"
 }
 
-echo "==> Removing retired jobs"
+echo "==> Removing retired / redundant jobs"
 delete_job "housekeeper-stack"
 delete_job "housekeeper-backend"
 delete_job "housekeeper-frontend"
 delete_job "watch-github"
 delete_job "pull-collaboration-now"
 delete_job "switch-watch-branch"
-
-SKIP_QUALITY_PARAM='<hudson.model.BooleanParameterDefinition>
-          <name>SKIP_QUALITY</name>
-          <description>Skip eslint/unit tests (emergency only)</description>
-          <defaultValue>false</defaultValue>
-        </hudson.model.BooleanParameterDefinition>'
-
-sync_job "collaboration-stack" \
-  "$JOBS_DIR/Jenkinsfile.collaboration-stack" \
-  "Collaboration — start/stop the full stack, or trigger FE+BE image pipelines"
+delete_job "collaboration-stack"
 
 sync_job "collaboration-backend" \
   "$JOBS_DIR/Jenkinsfile.collaboration-backend" \
-  "Collaboration backend — quality, image build/push, deploy, smoke" \
-  "$SKIP_QUALITY_PARAM"
+  "Backend — build/push, deploy, verify (same stages as backend/Jenkinsfile)"
 
 sync_job "collaboration-frontend" \
   "$JOBS_DIR/Jenkinsfile.collaboration-frontend" \
-  "Collaboration frontend — quality, image build/push, deploy, smoke" \
-  "$SKIP_QUALITY_PARAM"
+  "Frontend — build/push, deploy, verify (same stages as frontend/Jenkinsfile)"
 
 sync_job "collaboration-notification" \
   "$JOBS_DIR/Jenkinsfile.collaboration-notification" \
-  "Notification-and-email-service — mirrors production NES Jenkinsfile (lab registry + compose)" \
-  "$SKIP_QUALITY_PARAM"
+  "Notification service — build/push, deploy, verify (same stages as NES/Jenkinsfile)"
 
 sync_choice_job "apply-vault-env" \
   "$JOBS_DIR/Jenkinsfile.apply-vault-env" \

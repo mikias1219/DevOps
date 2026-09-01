@@ -4,8 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:8080}"
-JOB_NAME="${1:-collaboration-stack}"
-ACTION="${ACTION:-${2:-start}}"
+JOB_NAME="${1:-collaboration-backend}"
+ACTION="${ACTION:-${2:-recreate}}"
 SKIP_TESTS="${SKIP_TESTS:-true}"
 JENKINS_ADMIN_USER="${JENKINS_ADMIN_USER:-admin}"
 JENKINS_ADMIN_PASS="${JENKINS_ADMIN_PASS:-DevOps@2026}"

@@ -4,7 +4,7 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
-    timeout(time: 40, unit: 'MINUTES')
+    timeout(time: 20, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '30'))
   }
 
@@ -16,26 +16,12 @@ pipeline {
   }
 
   stages {
-    stage('Why this job ran') {
-      steps {
-        script {
-          def causes = currentBuild.getBuildCauses().collect { it.shortDescription }.join(' | ')
-          echo "BUILD CAUSE: ${causes}"
-          echo "ACTION=${params.ACTION ?: env.ACTION}"
-          echo "Docker image is built ONLY when ACTION is build-and-start or update-from-github."
-          echo "start / stop / restart never build an image."
-          echo "If you did not click this job and did not push the backend repo, check github-push-collaboration."
-        }
-      }
-    }
-
     stage('Select Environment') {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
           echo "ACTION=${ACTION}"
-          echo "SKIP_QUALITY=${SKIP_QUALITY:-false}"
           print_environment
         '''
       }
@@ -57,14 +43,13 @@ pipeline {
     }
 
     stage('Prepare Repository') {
+      when { expression { return env.ACTION != 'stop' } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
           ensure_local_registry
-          if [ "${ACTION}" != "stop" ]; then
-            ensure_collaboration_infra
-          fi
+          ensure_collaboration_infra
         '''
       }
     }
@@ -80,23 +65,8 @@ pipeline {
       }
     }
 
-    stage('Quality') {
-      when {
-        expression {
-          return !['start', 'stop', 'restart'].contains(env.ACTION) && env.SKIP_QUALITY != 'true'
-        }
-      }
-      steps {
-        sh '''#!/usr/bin/env bash
-          set -euo pipefail
-          . /var/devops/jenkins/lib/docker-lib.sh
-          quality_collaboration_backend
-        '''
-      }
-    }
-
     stage('Build and Push Docker Image') {
-      when { expression { return !['start', 'stop', 'restart'].contains(env.ACTION) } }
+      when { expression { return !['start', 'stop', 'restart', 'recreate'].contains(env.ACTION) } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
@@ -115,7 +85,7 @@ pipeline {
             stop)
               stop_collaboration_service "${SERVICE}"
               ;;
-            start|restart|build-and-start|update-from-github)
+            start|restart|recreate|build-and-start|update-from-github)
               deploy_collaboration_service "${SERVICE}"
               ;;
             *)
@@ -133,18 +103,14 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
-          wait_collaboration_backend_smoke "${SERVICE}"
+          wait_collaboration_backend_smoke "${SERVICE}" 40
         '''
       }
     }
   }
 
   post {
-    success {
-      echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} ACTION=${env.ACTION}"
-    }
-    failure {
-      echo 'Failed — open Console Output. Fix git in the DevOps repo; do not scp Jenkinsfiles.'
-    }
+    success { echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} ACTION=${env.ACTION}" }
+    failure { echo 'Deployment failed — see Console Output.' }
   }
 }

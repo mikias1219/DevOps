@@ -4,7 +4,7 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
-    timeout(time: 40, unit: 'MINUTES')
+    timeout(time: 20, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '30'))
   }
 
@@ -16,26 +16,12 @@ pipeline {
   }
 
   stages {
-    stage('Why this job ran') {
-      steps {
-        script {
-          def causes = currentBuild.getBuildCauses().collect { it.shortDescription }.join(' | ')
-          echo "BUILD CAUSE: ${causes}"
-          echo "ACTION=${params.ACTION ?: env.ACTION}"
-          echo "Mirrors production Notification-and-email-service Jenkinsfile:"
-          echo "  select env → pull → build image → push registry → deploy → verify"
-          echo "App repo is read-only build context — all DevOps code lives in docker-devops."
-        }
-      }
-    }
-
     stage('Select Environment') {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
           echo "ACTION=${ACTION}"
-          echo "SKIP_QUALITY=${SKIP_QUALITY:-false}"
           print_notification_environment
         '''
       }
@@ -57,14 +43,13 @@ pipeline {
     }
 
     stage('Prepare Repository') {
+      when { expression { return env.ACTION != 'stop' } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
           ensure_local_registry
-          if [ "${ACTION}" != "stop" ]; then
-            ensure_notification_infra
-          fi
+          ensure_notification_infra
         '''
       }
     }
@@ -80,23 +65,8 @@ pipeline {
       }
     }
 
-    stage('Quality') {
-      when {
-        expression {
-          return !['start', 'stop', 'restart'].contains(env.ACTION) && env.SKIP_QUALITY != 'true'
-        }
-      }
-      steps {
-        sh '''#!/usr/bin/env bash
-          set -euo pipefail
-          . /var/devops/jenkins/lib/docker-lib.sh
-          quality_collaboration_notification
-        '''
-      }
-    }
-
     stage('Build and Push Docker Image') {
-      when { expression { return !['start', 'stop', 'restart'].contains(env.ACTION) } }
+      when { expression { return !['start', 'stop', 'restart', 'recreate'].contains(env.ACTION) } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
@@ -115,7 +85,7 @@ pipeline {
             stop)
               stop_notification_service "${SERVICE}"
               ;;
-            start|restart|build-and-start|update-from-github)
+            start|restart|recreate|build-and-start|update-from-github)
               deploy_notification_service "${SERVICE}"
               ;;
             *)
@@ -133,18 +103,14 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
-          wait_notification_smoke "${SERVICE}"
+          wait_notification_smoke "${SERVICE}" 40
         '''
       }
     }
   }
 
   post {
-    success {
-      echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} ACTION=${env.ACTION}"
-    }
-    failure {
-      echo 'Failed — see Console Output. Fix docker-devops only; do not edit app Jenkinsfiles.'
-    }
+    success { echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} ACTION=${env.ACTION}" }
+    failure { echo 'Deployment failed — see Console Output.' }
   }
 }

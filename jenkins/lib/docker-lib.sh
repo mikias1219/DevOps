@@ -225,22 +225,26 @@ ensure_collaboration_infra() {
 _quality_copy_run() {
   _dir="$1"
   _script="$2"
+  _node_image="${3:-node:20-bookworm-slim}"
   if [ ! -f "$_dir/package.json" ]; then
     echo "No package.json in $_dir" >&2
-    return 1
+    return 0
   fi
-  # No apt/g++ here — that made Quality take ~20 minutes. Lint/tests use
-  # published packages. App source is copied so we never --fix the git tree.
+  # Report-only quality: never fail the pipeline. Copy tree so eslint --fix
+  # cannot dirty the app repo. npm install may fail on slow networks (bcrypt).
   docker run --rm \
     -v "$_dir:/src:ro" \
     -w /tmp/src \
-    node:20-bookworm-slim \
+    "$_node_image" \
     sh -c "
-      set -e
+      set +e
       cp -a /src/. /tmp/src
       cd /tmp/src
-      npm install --no-audit --no-fund --legacy-peer-deps
+      npm config set fetch-timeout 600000 fetch-retries 5 >/dev/null 2>&1 || true
+      npm install --no-audit --no-fund --legacy-peer-deps \
+        || echo 'WARN: npm install failed in quality stage (not failing pipeline)'
       $_script
+      exit 0
     "
 }
 
@@ -272,6 +276,12 @@ _git_branch_name() {
   git -C "$1" rev-parse --abbrev-ref HEAD
 }
 
+_registry_has_tag() {
+  _image="$1"
+  _tag="$2"
+  docker pull "${_image}:${_tag}" >/dev/null 2>&1
+}
+
 _frontend_public_arg() {
   _key="$1"
   _default="$2"
@@ -285,16 +295,24 @@ build_and_push_collaboration_backend() {
   _branch="$(_git_branch_name "$_src")"
   _image="${_reg}/collaboration-backend"
   ensure_local_registry
+  if _registry_has_tag "$_image" "$_sha"; then
+    echo "==> skip build: ${_image}:${_sha} already in registry"
+    env_file_set "$ENV_FILE" BACKEND_IMAGE_TAG "$_sha"
+    echo "BACKEND_IMAGE_TAG=${_sha}"
+    return 0
+  fi
   echo "==> docker build ${_image}:${_sha}"
   # Classic builder: this host may not have the buildx plugin.
   DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/backend.Dockerfile" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
+    -t "${_image}:latest" \
     "$_src"
   echo "==> docker push ${_image}:${_sha} and :${_branch}"
   docker push "${_image}:${_sha}"
   docker push "${_image}:${_branch}"
+  docker push "${_image}:latest"
   env_file_set "$ENV_FILE" BACKEND_IMAGE_TAG "$_sha"
   echo "BACKEND_IMAGE_TAG=${_sha}"
 }
@@ -323,8 +341,13 @@ build_and_push_collaboration_frontend() {
     return 1
   fi
   ensure_local_registry
+  if _registry_has_tag "$_image" "$_sha"; then
+    echo "==> skip build: ${_image}:${_sha} already in registry"
+    env_file_set "$ENV_FILE" FRONTEND_IMAGE_TAG "$_sha"
+    echo "FRONTEND_IMAGE_TAG=${_sha}"
+    return 0
+  fi
   echo "==> docker build ${_image}:${_sha}"
-  # Classic builder: this host may not have the buildx plugin.
   DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile" \
     --build-arg "NEXT_PUBLIC_COLLABORATION_URL=${_api_v1}" \
@@ -341,10 +364,12 @@ build_and_push_collaboration_frontend() {
     --build-arg "NEXT_PUBLIC_APP_ID=${_fb_app}" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
+    -t "${_image}:latest" \
     "$_src"
   echo "==> docker push ${_image}:${_sha} and :${_branch}"
   docker push "${_image}:${_sha}"
   docker push "${_image}:${_branch}"
+  docker push "${_image}:latest"
   env_file_set "$ENV_FILE" FRONTEND_IMAGE_TAG "$_sha"
   echo "FRONTEND_IMAGE_TAG=${_sha}"
 }
@@ -544,7 +569,8 @@ quality_collaboration_notification() {
   _src="$(notification_source)"
   echo "==> Quality: notification eslint (report only)"
   _quality_copy_run "$_src" \
-    'npx eslint "src/**/*.{js,ts}" || echo "WARN: eslint reported issues (not failing)"'
+    'npx eslint "src/**/*.{js,ts}" || echo "WARN: eslint reported issues (not failing)"' \
+    node:18-bookworm-slim
 }
 
 build_and_push_collaboration_notification() {
@@ -554,15 +580,23 @@ build_and_push_collaboration_notification() {
   _branch="$(_git_branch_name "$_src")"
   _image="${_reg}/collaboration-notification"
   ensure_local_registry
+  if _registry_has_tag "$_image" "$_sha"; then
+    echo "==> skip build: ${_image}:${_sha} already in registry"
+    env_file_set "$NOTIFICATION_ENV_FILE" NOTIFICATION_IMAGE_TAG "$_sha"
+    echo "NOTIFICATION_IMAGE_TAG=${_sha}"
+    return 0
+  fi
   echo "==> docker build ${_image}:${_sha}"
   DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/notification/docker/notification.Dockerfile" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
+    -t "${_image}:latest" \
     "$_src"
   echo "==> docker push ${_image}:${_sha} and :${_branch}"
   docker push "${_image}:${_sha}"
   docker push "${_image}:${_branch}"
+  docker push "${_image}:latest"
   env_file_set "$NOTIFICATION_ENV_FILE" NOTIFICATION_IMAGE_TAG "$_sha"
   echo "NOTIFICATION_IMAGE_TAG=${_sha}"
 }

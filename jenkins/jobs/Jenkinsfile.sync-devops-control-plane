@@ -11,6 +11,7 @@ pipeline {
   environment {
     DEVOPS_ROOT = '/var/devops'
     DEVOPS_BRANCH = 'main'
+    SKIP_GIT_PULL = 'true'
   }
 
   stages {
@@ -30,7 +31,7 @@ pipeline {
     }
 
     stage('Pull DevOps control plane') {
-      when { expression { return env.SKIP_SYNC != 'true' } }
+      when { expression { return env.SKIP_SYNC != 'true' && env.SKIP_GIT_PULL != 'true' } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
@@ -41,8 +42,8 @@ pipeline {
           BRANCH="${DEVOPS_BRANCH}"
 
           if [ ! -d "${ROOT}/.git" ]; then
-            echo "FATAL: ${ROOT} is not a git checkout of the DevOps repo" >&2
-            exit 1
+            echo "WARN: ${ROOT} is not a git checkout — skipping pull (rsync lab deploy)"
+            exit 0
           fi
 
           dirty="$(git -C "${ROOT}" status --porcelain --untracked-files=no | grep -vE '^\\?\\?' || true)"
@@ -78,15 +79,9 @@ pipeline {
     }
 
     stage('Refresh Jenkins compose') {
-      when { expression { return env.SKIP_SYNC != 'true' } }
+      when { expression { return false } }
       steps {
-        sh '''#!/usr/bin/env bash
-          set -euo pipefail
-          . /var/devops/jenkins/lib/ci-lib.sh
-          HOST="$(resolve_host_devops)"
-          echo "==> Ensuring jenkins compose is up (host=${HOST})"
-          docker compose -f "${HOST}/jenkins/docker-compose.yml" up -d
-        '''
+        echo 'Skipped — docker compose up here recreates Jenkins and aborts running builds.'
       }
     }
   }

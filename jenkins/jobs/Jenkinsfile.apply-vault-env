@@ -4,7 +4,7 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
-    timeout(time: 40, unit: 'MINUTES')
+    timeout(time: 45, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '30'))
   }
 
@@ -41,15 +41,13 @@ pipeline {
       }
     }
 
-    stage('Recreate backend') {
+    stage('Recreate backend (runtime env)') {
       when { expression { return params.TARGET in ['backend', 'both', 'all'] } }
       steps {
-        sh '''#!/usr/bin/env bash
-          set -euo pipefail
-          . /var/devops/jenkins/lib/docker-lib.sh
-          deploy_collaboration_service backend
-          wait_collaboration_backend_smoke backend
-        '''
+        build job: 'collaboration-backend',
+          wait: true,
+          propagate: true,
+          parameters: [string(name: 'ACTION', value: 'recreate')]
       }
     }
 
@@ -59,28 +57,23 @@ pipeline {
         build job: 'collaboration-frontend',
           wait: true,
           propagate: true,
-          parameters: [
-            string(name: 'ACTION', value: 'build-and-start'),
-            booleanParam(name: 'SKIP_QUALITY', value: false)
-          ]
+          parameters: [string(name: 'ACTION', value: 'build-and-start')]
       }
     }
 
-    stage('Recreate notification') {
+    stage('Recreate notification (runtime env)') {
       when { expression { return params.TARGET in ['notification', 'all'] } }
       steps {
-        sh '''#!/usr/bin/env bash
-          set -euo pipefail
-          . /var/devops/jenkins/lib/docker-lib.sh
-          deploy_notification_service notification
-          wait_notification_smoke notification
-        '''
+        build job: 'collaboration-notification',
+          wait: true,
+          propagate: true,
+          parameters: [string(name: 'ACTION', value: 'recreate')]
       }
     }
   }
 
   post {
     success { echo "apply-vault-env finished TARGET=${params.TARGET}" }
-    failure { echo 'apply-vault-env failed — Vault export or recreate did not complete' }
+    failure { echo 'apply-vault-env failed — see Console Output' }
   }
 }

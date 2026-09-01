@@ -1,10 +1,12 @@
-# Collaboration frontend image owned by docker-devops (do not use the app-repo Dockerfile).
+# Lab frontend — uses cached node:20-bookworm-slim
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* .npmrc* ./
-RUN npm install --no-audit --no-fund --legacy-peer-deps
+RUN npm config set fetch-timeout 600000 fetch-retries 5 \
+  && npm ci --no-audit --no-fund --legacy-peer-deps 2>/dev/null \
+    || npm install --no-audit --no-fund --legacy-peer-deps
 
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
@@ -36,8 +38,6 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN rm -rf node_modules
-COPY --from=deps /app/node_modules ./node_modules
 RUN mkdir -p public
 RUN NODE_OPTIONS=--max-old-space-size=4096 npx next build
 
@@ -48,11 +48,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3001
 RUN useradd -m -u 1001 nextjs
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package.json ./package.json
-RUN chown -R nextjs:nextjs /app
+COPY --from=deps --chown=nextjs:nextjs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nextjs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nextjs /app/public ./public
+COPY --from=builder --chown=nextjs:nextjs /app/package.json ./package.json
 USER nextjs
 EXPOSE 3001
 CMD ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3001"]

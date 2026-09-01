@@ -88,10 +88,7 @@ pipeline {
         build job: 'collaboration-backend',
           wait: true,
           propagate: true,
-          parameters: [
-            string(name: 'ACTION', value: 'update-from-github'),
-            booleanParam(name: 'SKIP_QUALITY', value: false)
-          ]
+          parameters: [string(name: 'ACTION', value: 'update-from-github')]
       }
     }
 
@@ -101,10 +98,7 @@ pipeline {
         build job: 'collaboration-frontend',
           wait: true,
           propagate: true,
-          parameters: [
-            string(name: 'ACTION', value: 'update-from-github'),
-            booleanParam(name: 'SKIP_QUALITY', value: false)
-          ]
+          parameters: [string(name: 'ACTION', value: 'update-from-github')]
       }
     }
 
@@ -114,10 +108,7 @@ pipeline {
         build job: 'collaboration-notification',
           wait: true,
           propagate: true,
-          parameters: [
-            string(name: 'ACTION', value: 'update-from-github'),
-            booleanParam(name: 'SKIP_QUALITY', value: false)
-          ]
+          parameters: [string(name: 'ACTION', value: 'update-from-github')]
       }
     }
   }

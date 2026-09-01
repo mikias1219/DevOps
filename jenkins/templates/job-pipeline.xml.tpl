@@ -14,6 +14,7 @@
               <string>start</string>
               <string>stop</string>
               <string>restart</string>
+              <string>recreate</string>
               <string>build-and-start</string>
               <string>update-from-github</string>
             </a>
