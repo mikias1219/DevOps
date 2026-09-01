@@ -14,6 +14,14 @@ Production `frontend/Jenkinsfile` is the **stage shape** we copy (select env →
 
 ## Daily learning loop
 
+See **[LEARNING-GUIDE.md](LEARNING-GUIDE.md)** for the full end-to-end guide (server `172.16.50.39`).
+
+One-command setup from laptop:
+
+```bash
+bash scripts/install-from-laptop.sh --fresh
+```
+
 You click Jenkins to learn. GitHub **develop** pushes also start the matching app job (see `jenkins/README.md`).
 
 Jenkins layout and jobs: **[jenkins/README.md](jenkins/README.md)**.

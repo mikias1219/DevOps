@@ -1,0 +1,150 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 40, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '30'))
+  }
+
+  environment {
+    DEVOPS_ROOT = '/var/devops'
+    COMPOSE_FILE = '/var/devops/notification/docker-compose.yml'
+    ENV_FILE = '/var/devops/notification/.env.docker'
+    SERVICE = 'notification'
+  }
+
+  stages {
+    stage('Why this job ran') {
+      steps {
+        script {
+          def causes = currentBuild.getBuildCauses().collect { it.shortDescription }.join(' | ')
+          echo "BUILD CAUSE: ${causes}"
+          echo "ACTION=${params.ACTION ?: env.ACTION}"
+          echo "Mirrors production Notification-and-email-service Jenkinsfile:"
+          echo "  select env → pull → build image → push registry → deploy → verify"
+          echo "App repo is read-only build context — all DevOps code lives in docker-devops."
+        }
+      }
+    }
+
+    stage('Select Environment') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          echo "ACTION=${ACTION}"
+          echo "SKIP_QUALITY=${SKIP_QUALITY:-false}"
+          print_notification_environment
+        '''
+      }
+    }
+
+    stage('Fetch Application Variables') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          SOURCE="$(notification_source)"
+          echo "SOURCE=${SOURCE}"
+          echo "BRANCH=$(notification_branch)"
+          echo "DOCKERFILE=${DEVOPS_ROOT}/notification/docker/notification.Dockerfile"
+          echo "IMAGE=$(registry_host)/collaboration-notification"
+          test -d "${SOURCE}" || { echo "Missing notification source at ${SOURCE}" >&2; exit 1; }
+        '''
+      }
+    }
+
+    stage('Prepare Repository') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          ensure_local_registry
+          if [ "${ACTION}" != "stop" ]; then
+            ensure_notification_infra
+          fi
+        '''
+      }
+    }
+
+    stage('Pull Latest Changes') {
+      when { expression { return env.ACTION == 'update-from-github' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          git_pull_repo "$(notification_source)" "$(notification_branch)"
+        '''
+      }
+    }
+
+    stage('Quality') {
+      when {
+        expression {
+          return !['start', 'stop', 'restart'].contains(env.ACTION) && env.SKIP_QUALITY != 'true'
+        }
+      }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          quality_collaboration_notification
+        '''
+      }
+    }
+
+    stage('Build and Push Docker Image') {
+      when { expression { return !['start', 'stop', 'restart'].contains(env.ACTION) } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          build_and_push_collaboration_notification
+        '''
+      }
+    }
+
+    stage('Deploy Service') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          case "${ACTION}" in
+            stop)
+              stop_notification_service "${SERVICE}"
+              ;;
+            start|restart|build-and-start|update-from-github)
+              deploy_notification_service "${SERVICE}"
+              ;;
+            *)
+              echo "Unknown ACTION=${ACTION}" >&2
+              exit 1
+              ;;
+          esac
+        '''
+      }
+    }
+
+    stage('Verify Deployment') {
+      when { expression { return env.ACTION != 'stop' } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          wait_notification_smoke "${SERVICE}"
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} ACTION=${env.ACTION}"
+    }
+    failure {
+      echo 'Failed — see Console Output. Fix docker-devops only; do not edit app Jenkinsfiles.'
+    }
+  }
+}

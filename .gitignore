@@ -7,9 +7,12 @@ jenkins/job-*.xml
 **/.env
 **/.env.docker
 !**/.env.docker.example
+!collaboration/env/*.example
+!notification/env/*.example
 
 # Copied app secrets — never commit (Firebase keys, Stripe, private keys)
 collaboration/env/*.env
+notification/env/*.env
 
 # Jenkins / Vault / Secrets Room — real secrets never in git
 jenkins/secrets/admin.env

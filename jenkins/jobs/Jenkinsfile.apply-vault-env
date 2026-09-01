@@ -20,20 +20,29 @@ pipeline {
       }
     }
 
+    stage('Ensure Vault unsealed') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          /var/devops/scripts/ensure-vault-unsealed.sh
+        '''
+      }
+    }
+
     stage('Export Vault to env files') {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/ci-lib.sh
-          export TARGET="${TARGET:-both}"
+          export TARGET="${TARGET:-all}"
           export DEVOPS_HOST_PATH="$(resolve_host_devops)"
-          /var/devops/scripts/vault-export-collaboration-env.sh
+          /var/devops/scripts/vault-export-all-env.sh
         '''
       }
     }
 
     stage('Recreate backend') {
-      when { expression { return params.TARGET == 'backend' || params.TARGET == 'both' } }
+      when { expression { return params.TARGET in ['backend', 'both', 'all'] } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
@@ -45,7 +54,7 @@ pipeline {
     }
 
     stage('Rebuild frontend (NEXT_PUBLIC is bake-time)') {
-      when { expression { return params.TARGET == 'frontend' || params.TARGET == 'both' } }
+      when { expression { return params.TARGET in ['frontend', 'both', 'all'] } }
       steps {
         build job: 'collaboration-frontend',
           wait: true,
@@ -54,6 +63,18 @@ pipeline {
             string(name: 'ACTION', value: 'build-and-start'),
             booleanParam(name: 'SKIP_QUALITY', value: false)
           ]
+      }
+    }
+
+    stage('Recreate notification') {
+      when { expression { return params.TARGET in ['notification', 'all'] } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          deploy_notification_service notification
+          wait_notification_smoke notification
+        '''
       }
     }
   }

@@ -6,6 +6,7 @@ One file per Jenkins job. `bin/sync-jobs.sh` reads these files and POSTs them to
 |---|---|
 | `Jenkinsfile.collaboration-backend` | collaboration-backend |
 | `Jenkinsfile.collaboration-frontend` | collaboration-frontend |
+| `Jenkinsfile.collaboration-notification` | collaboration-notification |
 | `Jenkinsfile.collaboration-stack` | collaboration-stack |
 | `Jenkinsfile.github-push-collaboration` | github-push-collaboration |
 | `Jenkinsfile.sync-devops-control-plane` | sync-devops-control-plane |

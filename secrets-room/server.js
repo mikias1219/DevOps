@@ -60,6 +60,15 @@ const PROJECTS = {
         envFile: path.join(DEVOPS_ROOT, 'collaboration/.env.docker'),
         applyTarget: 'both',
       },
+      notification: {
+        id: 'notification',
+        label: 'Notification service',
+        subtitle: 'Notification-and-email-service runtime',
+        vaultPath: 'secret/data/collaboration/notification',
+        exampleFile: path.join(DEVOPS_ROOT, 'notification/env/notification.env.example'),
+        envFile: path.join(DEVOPS_ROOT, 'notification/env/notification.env'),
+        applyTarget: 'notification',
+      },
     },
   },
 };

@@ -27,20 +27,30 @@ fi
 
 export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
 
-if ! command -v vault >/dev/null 2>&1; then
-  if [[ -x /tmp/vault ]]; then
-    VAULT_BIN=/tmp/vault
-  else
-    echo "vault CLI not found" >&2
-    exit 1
-  fi
-else
+use_docker_vault=0
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx selamnew-vault; then
+  use_docker_vault=1
+elif command -v vault >/dev/null 2>&1; then
   VAULT_BIN="$(command -v vault)"
+elif [[ -x /tmp/vault ]]; then
+  VAULT_BIN=/tmp/vault
+else
+  echo "vault CLI not found and selamnew-vault container not running" >&2
+  exit 1
 fi
+
+vault_cmd() {
+  if [[ "$use_docker_vault" -eq 1 ]]; then
+    docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="${VAULT_TOKEN:-}" \
+      selamnew-vault vault "$@"
+  else
+    "$VAULT_BIN" "$@"
+  fi
+}
 
 # If only Approle creds, login
 if [[ -z "${VAULT_TOKEN:-}" && -n "${VAULT_ROLE_ID:-}" ]]; then
-  VAULT_TOKEN="$("$VAULT_BIN" write -field=token auth/approle/login \
+  VAULT_TOKEN="$(vault_cmd write -field=token auth/approle/login \
     role_id="$VAULT_ROLE_ID" secret_id="$VAULT_SECRET_ID")"
   export VAULT_TOKEN
 fi
@@ -79,7 +89,7 @@ put_env_file() {
     echo "  (empty)"
     return 0
   fi
-  "$VAULT_BIN" kv put "secret/${mount_path}" "${PAIRS[@]}"
+  vault_cmd kv put "secret/${mount_path}" "${PAIRS[@]}"
 }
 
 put_env_file "collaboration/backend" "$BACKEND_ENV"

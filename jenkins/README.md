@@ -24,6 +24,7 @@ Pipelines **source** `/var/devops/jenkins/lib/docker-lib.sh`.
 |---|---|---|
 | `collaboration-backend` | You, or GitHub `develop` on the backend repo | Select env → pull (if asked) → quality (report) → image → deploy → smoke |
 | `collaboration-frontend` | You, or GitHub `develop` on the frontend repo | Same for Next |
+| `collaboration-notification` | You, or GitHub `develop` on NES repo | Same for Notification-and-email-service |
 | `collaboration-stack` | You | start/stop/restart compose. `build-and-start` runs **both** app jobs |
 | `github-push-collaboration` | GitHub webhook | Router. `develop` + backend repo → backend job only |
 | `sync-devops-control-plane` | GitHub webhook on **this** repo | `git pull` + `bin/sync-jobs.sh`. Never builds the app |

@@ -28,7 +28,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ..:/var/devops:rw
       - ./init.groovy.d:/usr/share/jenkins/ref/init.groovy.d:ro
-      - ${COLLABORATION_SOURCE:-/home/mikias/workspace/company/SelamnewCollaboration}:${COLLABORATION_SOURCE:-/home/mikias/workspace/company/SelamnewCollaboration}:rw
+      - ${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}:${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}:rw
       - ${HOME}/.ssh:/var/jenkins_home/.ssh-host:ro
       - ./secrets:/var/devops/jenkins/secrets:ro
     healthcheck:

@@ -335,11 +335,16 @@ sync_job "collaboration-frontend" \
   "Collaboration frontend — quality, image build/push, deploy, smoke" \
   "$SKIP_QUALITY_PARAM"
 
+sync_job "collaboration-notification" \
+  "$JOBS_DIR/Jenkinsfile.collaboration-notification" \
+  "Notification-and-email-service — mirrors production NES Jenkinsfile (lab registry + compose)" \
+  "$SKIP_QUALITY_PARAM"
+
 sync_choice_job "apply-vault-env" \
   "$JOBS_DIR/Jenkinsfile.apply-vault-env" \
-  "Export Vault KV to collaboration/env/*.env then recreate/rebuild apps." \
+  "Export Vault KV to env files then recreate/rebuild apps." \
   "TARGET" \
-  "both,backend,frontend"
+  "all,both,backend,frontend,notification"
 
 sync_gwt_job "sync-devops-control-plane" \
   "$JOBS_DIR/Jenkinsfile.sync-devops-control-plane" \

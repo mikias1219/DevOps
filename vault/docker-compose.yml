@@ -20,7 +20,9 @@ services:
       - ./config/vault.hcl:/vault/config/vault.hcl:ro
       - vault_data:/vault/file
       - ./secrets:/vault/secrets:ro
-    entrypoint: ["vault"]
+      - ./scripts/docker-entrypoint-unseal.sh:/usr/local/bin/docker-entrypoint-unseal.sh:ro
+    # Auto-unseal after restart when vault/secrets/vault-keys.env exists
+    entrypoint: ["/bin/sh", "/usr/local/bin/docker-entrypoint-unseal.sh"]
     command: ["server", "-config=/vault/config/vault.hcl"]
 
 volumes:

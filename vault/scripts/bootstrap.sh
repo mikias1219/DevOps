@@ -13,11 +13,27 @@ mkdir -p "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR"
 
 if ! command -v vault >/dev/null 2>&1; then
-  echo "Installing vault CLI into /tmp for bootstrap..."
-  curl -fsSL -o /tmp/vault.zip \
-    https://releases.hashicorp.com/vault/1.17.6/vault_1.17.6_linux_amd64.zip
-  unzip -o /tmp/vault.zip -d /tmp
-  VAULT_BIN=/tmp/vault
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx selamnew-vault; then
+    vault() {
+      docker exec \
+        -e "VAULT_ADDR=${VAULT_ADDR}" \
+        -e "VAULT_TOKEN=${VAULT_TOKEN:-}" \
+        selamnew-vault vault "$@"
+    }
+    VAULT_BIN=vault
+    echo "Using vault CLI via selamnew-vault container"
+  else
+    echo "Installing vault CLI into /tmp for bootstrap..."
+    if command -v unzip >/dev/null 2>&1; then
+      curl -fsSL -o /tmp/vault.zip \
+        https://releases.hashicorp.com/vault/1.17.6/vault_1.17.6_linux_amd64.zip
+      unzip -o /tmp/vault.zip -d /tmp
+      VAULT_BIN=/tmp/vault
+    else
+      echo "FATAL: need unzip or running selamnew-vault container. Start: docker compose -f vault/docker-compose.yml up -d" >&2
+      exit 1
+    fi
+  fi
 else
   VAULT_BIN="$(command -v vault)"
 fi
@@ -74,8 +90,23 @@ export VAULT_TOKEN="$VAULT_ROOT_TOKEN"
 echo "==> Enable KV v2 at secret/"
 "$VAULT_BIN" secrets enable -path=secret kv-v2 2>/dev/null || echo "KV already enabled"
 
+write_policy() {
+  _name="$1"
+  if declare -F vault >/dev/null 2>&1; then
+    cat | docker exec -i \
+      -e "VAULT_ADDR=${VAULT_ADDR}" \
+      -e "VAULT_TOKEN=${VAULT_TOKEN:-}" \
+      selamnew-vault vault policy write "$_name" -
+  else
+    _file="$(mktemp)"
+    cat >"$_file"
+    "$VAULT_BIN" policy write "$_name" "$_file"
+    rm -f "$_file"
+  fi
+}
+
 echo "==> Write collaboration policies"
-"$VAULT_BIN" policy write collaboration-admin - <<'EOF'
+write_policy collaboration-admin <<'EOF'
 path "secret/metadata/" {
   capabilities = ["list"]
 }
@@ -101,7 +132,7 @@ OPERATOR_PASS="${VAULT_OPERATOR_PASSWORD:-$(openssl rand -hex 12)}"
 
 # AppRole for CI / export scripts
 "$VAULT_BIN" auth enable approle 2>/dev/null || true
-"$VAULT_BIN" policy write collaboration-reader - <<'EOF'
+write_policy collaboration-reader <<'EOF'
 path "secret/data/collaboration/*" {
   capabilities = ["read", "list"]
 }
@@ -129,6 +160,7 @@ chmod 600 "$SECRETS_DIR/vault-approle.env"
 "$VAULT_BIN" kv put secret/collaboration/backend _seed=true >/dev/null || true
 "$VAULT_BIN" kv put secret/collaboration/frontend _seed=true >/dev/null || true
 "$VAULT_BIN" kv put secret/collaboration/compose _seed=true >/dev/null || true
+"$VAULT_BIN" kv put secret/collaboration/notification _seed=true >/dev/null || true
 
 cat >"$SECRETS_DIR/operator-login.txt" <<EOF
 Vault UI:  ${ADDR}/ui

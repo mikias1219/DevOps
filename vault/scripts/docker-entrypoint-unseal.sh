@@ -5,8 +5,12 @@ set -eu
 VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
 export VAULT_ADDR
 
-# Launch vault in background
-docker-entrypoint.sh "$@" &
+# Launch vault in background (official image entrypoint)
+if command -v docker-entrypoint.sh >/dev/null 2>&1; then
+  docker-entrypoint.sh "$@" &
+else
+  vault "$@" &
+fi
 VAULT_PID=$!
 
 # Wait for vault process to answer (sealed or unsealed)

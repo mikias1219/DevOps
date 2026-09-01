@@ -8,6 +8,13 @@ JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:8080}"
 JENKINS_ADMIN_USER="${JENKINS_ADMIN_USER:-admin}"
 JENKINS_ADMIN_PASS="${JENKINS_ADMIN_PASS:-DevOps@2026}"
 
+if [[ -f "$ROOT/jenkins/secrets/admin.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/jenkins/secrets/admin.env"
+  set +a
+fi
+
 chmod +x "$ROOT/jenkins/bin/"*.sh "$ROOT/jenkins/"*.sh "$ROOT/scripts/"*.sh 2>/dev/null || true
 
 echo "==> Ensuring Jenkins is running"
@@ -15,13 +22,33 @@ export DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 124)"
 docker compose -f "$COMPOSE_FILE" up -d
 
 echo "==> Waiting for Jenkins HTTP..."
-for i in $(seq 1 60); do
+for i in $(seq 1 90); do
   if curl -sf "$JENKINS_URL/login" >/dev/null 2>&1; then
     break
   fi
   sleep 3
 done
 
+# Fresh jenkins_home shows "Unlock Jenkins" wizard — init.groovy handles it on next restart.
+if curl -sf "$JENKINS_URL/login" 2>/dev/null | grep -q 'Unlock Jenkins'; then
+  echo "==> Setup wizard detected — installing init.groovy.d and restarting"
+  docker compose -f "$COMPOSE_FILE" exec -T jenkins bash -lc '
+    mkdir -p /var/jenkins_home/init.groovy.d
+    cp -f /usr/share/jenkins/ref/init.groovy.d/*.groovy /var/jenkins_home/init.groovy.d/ 2>/dev/null || true
+  '
+  docker compose -f "$COMPOSE_FILE" restart jenkins
+  for i in $(seq 1 90); do
+    if curl -sf -u "${JENKINS_ADMIN_USER}:${JENKINS_ADMIN_PASS}" "$JENKINS_URL/login" >/dev/null 2>&1; then
+      echo "Authenticated after init restart (attempt $i)"
+      break
+    fi
+    sleep 3
+  done
+fi
+
+if curl -sf -u "${JENKINS_ADMIN_USER}:${JENKINS_ADMIN_PASS}" "$JENKINS_URL/login" >/dev/null 2>&1; then
+  echo "==> Jenkins already authenticated — skipping script-console bootstrap"
+else
 echo "==> Temporarily disabling security to bootstrap admin user"
 docker compose -f "$COMPOSE_FILE" exec -T jenkins bash -lc "
   sed -i 's|<useSecurity>true</useSecurity>|<useSecurity>false</useSecurity>|' /var/jenkins_home/config.xml
@@ -77,6 +104,7 @@ docker compose -f "$COMPOSE_FILE" exec -T jenkins bash -lc "
   sed -i 's|<useSecurity>false</useSecurity>|<useSecurity>true</useSecurity>|' /var/jenkins_home/config.xml
 "
 docker compose -f "$COMPOSE_FILE" restart jenkins
+fi
 
 echo "==> Waiting for secured Jenkins..."
 for i in $(seq 1 60); do

@@ -13,6 +13,7 @@ pipeline {
     ENV_FILE = '/var/devops/collaboration/.env.docker'
     BACKEND_GITHUB = 'ie-network-solutions/selamnew-collaboration-backend'
     FRONTEND_GITHUB = 'ie-network-solutions/selamnew-collaboration-fe'
+    NOTIFICATION_GITHUB = 'ie-network-solutions/notification-and-email-service'
   }
 
   stages {
@@ -24,6 +25,7 @@ pipeline {
           echo "Webhook router: GitHub develop push → one app job."
           echo "  ${env.BACKEND_GITHUB}  → collaboration-backend"
           echo "  ${env.FRONTEND_GITHUB}  → collaboration-frontend"
+          echo "  ${env.NOTIFICATION_GITHUB}  → collaboration-notification"
         }
       }
     }
@@ -43,6 +45,7 @@ pipeline {
 
           env.RUN_BACKEND = 'false'
           env.RUN_FRONTEND = 'false'
+          env.RUN_NOTIFICATION = 'false'
           env.SKIP_DEPLOY = 'false'
 
           if (!repo && !repoName) {
@@ -60,13 +63,17 @@ pipeline {
 
           def isBackend = repo == env.BACKEND_GITHUB || repoName == 'selamnew-collaboration-backend'
           def isFrontend = repo == env.FRONTEND_GITHUB || repoName == 'selamnew-collaboration-fe'
+          def isNotification = repo == env.NOTIFICATION_GITHUB || repoName == 'notification-and-email-service'
 
-          if (isBackend && !isFrontend) {
+          if (isBackend && !isFrontend && !isNotification) {
             env.RUN_BACKEND = 'true'
             echo "develop + backend repo → collaboration-backend (ACTION=update-from-github)"
-          } else if (isFrontend && !isBackend) {
+          } else if (isFrontend && !isBackend && !isNotification) {
             env.RUN_FRONTEND = 'true'
             echo "Routing → collaboration-frontend (ACTION=update-from-github)"
+          } else if (isNotification && !isBackend && !isFrontend) {
+            env.RUN_NOTIFICATION = 'true'
+            echo "Routing → collaboration-notification (ACTION=update-from-github)"
           } else {
             echo "Unknown repo '${repo}' / '${repoName}'. Not starting a job."
             env.SKIP_DEPLOY = 'true'
@@ -92,6 +99,19 @@ pipeline {
       when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_FRONTEND == 'true' } }
       steps {
         build job: 'collaboration-frontend',
+          wait: true,
+          propagate: true,
+          parameters: [
+            string(name: 'ACTION', value: 'update-from-github'),
+            booleanParam(name: 'SKIP_QUALITY', value: false)
+          ]
+      }
+    }
+
+    stage('Notification from GitHub') {
+      when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_NOTIFICATION == 'true' } }
+      steps {
+        build job: 'collaboration-notification',
           wait: true,
           propagate: true,
           parameters: [

@@ -91,7 +91,20 @@ env_file_set() {
 }
 
 collaboration_source() {
-  env_file_get "$ENV_FILE" COLLABORATION_SOURCE ""
+  _src="$(env_file_get "$ENV_FILE" COLLABORATION_SOURCE "")"
+  if [ -n "$_src" ] && [ -d "$_src" ]; then
+    printf '%s' "$_src"
+    return 0
+  fi
+  for _try in \
+    /home/ienetworks/workspace/company/SelamnewCollaboration \
+    /home/mikias/workspace/company/SelamnewCollaboration; do
+    if [ -d "$_try" ]; then
+      printf '%s' "$_try"
+      return 0
+    fi
+  done
+  printf '%s' "$_src"
 }
 
 backend_branch() {
@@ -486,3 +499,107 @@ switch_watch_target() {
 # Bind-mount era helpers. Images now own node_modules.
 ensure_npm_packages() { echo "==> skip host npm (deps live in the image)"; }
 install_npm_packages() { ensure_npm_packages "$@"; }
+
+# ---------------------------------------------------------------------------
+# Notification-and-email-service (third app — lab mirrors production Jenkinsfile)
+# ---------------------------------------------------------------------------
+
+NOTIFICATION_COMPOSE="${DEVOPS_ROOT}/notification/docker-compose.yml"
+NOTIFICATION_ENV_FILE="${DEVOPS_ROOT}/notification/.env.docker"
+
+notification_source() {
+  _base="$(collaboration_source)"
+  if [ -n "$_base" ]; then
+    printf '%s/Notification-and-email-service' "$_base"
+    return 0
+  fi
+  env_file_get "$NOTIFICATION_ENV_FILE" COLLABORATION_SOURCE ""
+}
+
+notification_branch() {
+  _branch="$(env_file_get "$ENV_FILE" COLLABORATION_NOTIFICATION_BRANCH "")"
+  if [ -n "$_branch" ]; then
+    printf '%s' "$_branch"
+    return 0
+  fi
+  env_file_get "$NOTIFICATION_ENV_FILE" NOTIFICATION_BRANCH develop
+}
+
+print_notification_environment() {
+  echo "NOTIFICATION_COMPOSE=${NOTIFICATION_COMPOSE}"
+  echo "NOTIFICATION_ENV_FILE=${NOTIFICATION_ENV_FILE}"
+  echo "NOTIFICATION_SOURCE=$(notification_source)"
+  echo "NOTIFICATION_BRANCH=$(notification_branch)"
+  echo "REGISTRY=$(registry_host)"
+  echo "NOTIFICATION_IMAGE_TAG=$(env_file_get "$NOTIFICATION_ENV_FILE" NOTIFICATION_IMAGE_TAG latest)"
+  echo "ACTION=${ACTION:-}"
+}
+
+ensure_notification_infra() {
+  echo "==> Ensuring notification db"
+  docker compose -f "$NOTIFICATION_COMPOSE" --env-file "$NOTIFICATION_ENV_FILE" up -d db
+}
+
+quality_collaboration_notification() {
+  _src="$(notification_source)"
+  echo "==> Quality: notification eslint (report only)"
+  _quality_copy_run "$_src" \
+    'npx eslint "src/**/*.{js,ts}" || echo "WARN: eslint reported issues (not failing)"'
+}
+
+build_and_push_collaboration_notification() {
+  _src="$(notification_source)"
+  _reg="$(registry_host)"
+  _sha="$(_git_sha "$_src")"
+  _branch="$(_git_branch_name "$_src")"
+  _image="${_reg}/collaboration-notification"
+  ensure_local_registry
+  echo "==> docker build ${_image}:${_sha}"
+  DOCKER_BUILDKIT=0 docker build \
+    -f "${DEVOPS_ROOT}/notification/docker/notification.Dockerfile" \
+    -t "${_image}:${_sha}" \
+    -t "${_image}:${_branch}" \
+    "$_src"
+  echo "==> docker push ${_image}:${_sha} and :${_branch}"
+  docker push "${_image}:${_sha}"
+  docker push "${_image}:${_branch}"
+  env_file_set "$NOTIFICATION_ENV_FILE" NOTIFICATION_IMAGE_TAG "$_sha"
+  echo "NOTIFICATION_IMAGE_TAG=${_sha}"
+}
+
+deploy_notification_service() {
+  _service="$1"
+  echo "==> compose up --no-deps --force-recreate ${_service}"
+  docker compose -f "$NOTIFICATION_COMPOSE" --env-file "$NOTIFICATION_ENV_FILE" \
+    up -d --no-deps --force-recreate "$_service"
+}
+
+stop_notification_service() {
+  _service="$1"
+  echo "==> compose stop ${_service}"
+  docker compose -f "$NOTIFICATION_COMPOSE" --env-file "$NOTIFICATION_ENV_FILE" stop "$_service"
+}
+
+wait_notification_smoke() {
+  _service="${1:-notification}"
+  _max="${2:-90}"
+  _probe="require('http').get('http://127.0.0.1:8006/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+  echo "==> Waiting for ${_service} GET /api/v1/health"
+  _i=1
+  while [ "$_i" -le "$_max" ]; do
+    _state="$(docker compose -f "$NOTIFICATION_COMPOSE" --env-file "$NOTIFICATION_ENV_FILE" ps "$_service" --format '{{.State}}' 2>/dev/null || true)"
+    if [ "$_state" != "running" ]; then
+      echo "  attempt ${_i}/${_max}: state=${_state:-unknown}"
+    elif docker compose -f "$NOTIFICATION_COMPOSE" --env-file "$NOTIFICATION_ENV_FILE" exec -T "$_service" node -e "$_probe"; then
+      echo "notification service healthy"
+      return 0
+    else
+      echo "  attempt ${_i}/${_max}: health probe failed"
+    fi
+    sleep 3
+    _i=$((_i + 1))
+  done
+  echo "ERROR: ${_service} not healthy after ${_max} attempts" >&2
+  docker compose -f "$NOTIFICATION_COMPOSE" --env-file "$NOTIFICATION_ENV_FILE" logs --tail 120 "$_service" 2>&1 || true
+  return 1
+}

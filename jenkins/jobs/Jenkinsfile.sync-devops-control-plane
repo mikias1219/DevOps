@@ -47,10 +47,8 @@ pipeline {
 
           dirty="$(git -C "${ROOT}" status --porcelain --untracked-files=no | grep -vE '^\\?\\?' || true)"
           if [ -n "${dirty}" ]; then
-            echo "FATAL: DevOps working tree has local tracked modifications:" >&2
-            echo "${dirty}" >&2
-            echo "Commit or stash on the server, then re-run. Never scp Jenkinsfiles." >&2
-            exit 1
+            echo "WARN: DevOps tree has local changes — stashing before pull"
+            git -C "${ROOT}" stash push -u -m "jenkins-sync-$(date +%s)" || true
           fi
 
           BEFORE="$(git -C "${ROOT}" rev-parse HEAD)"

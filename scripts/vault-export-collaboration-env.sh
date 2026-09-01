@@ -12,6 +12,9 @@ DEVOPS_HOST_PATH="${DEVOPS_HOST_PATH:-/home/ienetworks/workspace/tools/docker-de
 
 mkdir -p "$OUT_DIR"
 
+# Jenkins / host: Vault seals on container restart — unseal before any KV read.
+bash "$ROOT/scripts/ensure-vault-unsealed.sh"
+
 if [[ -f "$SECRETS_DIR/vault-keys.env" ]]; then
   set -a
   # shellcheck disable=SC1091
