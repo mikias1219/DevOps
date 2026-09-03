@@ -3,8 +3,9 @@ pipeline {
 
   options {
     timestamps()
-    disableConcurrentBuilds()
-    timeout(time: 50, unit: 'MINUTES')
+    // Do not serialize FE/BE/NES pushes behind each other. Downstream app jobs
+    // already have disableConcurrentBuilds; the router only decides + fires.
+    timeout(time: 5, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '40'))
   }
 
@@ -85,9 +86,10 @@ pipeline {
     stage('Backend from GitHub') {
       when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_BACKEND == 'true' } }
       steps {
+        // wait:false so a long BE build does not block FE/NES webhook deliveries
         build job: 'collaboration-backend',
-          wait: true,
-          propagate: true,
+          wait: false,
+          propagate: false,
           parameters: [string(name: 'ACTION', value: 'update-from-github')]
       }
     }
@@ -96,8 +98,8 @@ pipeline {
       when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_FRONTEND == 'true' } }
       steps {
         build job: 'collaboration-frontend',
-          wait: true,
-          propagate: true,
+          wait: false,
+          propagate: false,
           parameters: [string(name: 'ACTION', value: 'update-from-github')]
       }
     }
@@ -106,8 +108,8 @@ pipeline {
       when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_NOTIFICATION == 'true' } }
       steps {
         build job: 'collaboration-notification',
-          wait: true,
-          propagate: true,
+          wait: false,
+          propagate: false,
           parameters: [string(name: 'ACTION', value: 'update-from-github')]
       }
     }
