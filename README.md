@@ -269,23 +269,73 @@ bash jenkins/bin/sync-jobs.sh
 
 ---
 
-## Secrets & Vault — how config reaches containers
+## Secrets & env management (Vault UI + Secrets Room)
+
+Two UIs, one pipeline:
+
+| UI | URL | Purpose |
+|----|-----|---------|
+| **Vault UI** | http://172.16.50.39:8200/ui | Edit KV secrets (`secret/collaboration/*`) |
+| **Secrets Room** | http://172.16.50.39:8300/ | Compare Vault ↔ `env/*.env`, export, trigger **apply** |
 
 ```mermaid
 flowchart LR
-  V[Vault KV] --> SR[Secrets Room :8300]
-  V --> APPLY[apply-vault-env]
-  SR --> APPLY
+  Op[Operator] --> VUI[Vault UI :8200]
+  Op --> SR[Secrets Room :8300]
+  VUI --> KV["KV secret/collaboration/*"]
+  SR --> KV
+  SR --> APPLY[Jenkins apply-vault-env]
   APPLY --> BE_ENV[collaboration/env/backend.env]
   APPLY --> FE_ENV[collaboration/env/frontend.env]
   APPLY --> NES_ENV[notification/env]
-  BE_ENV --> BE[backend container]
-  FE_ENV --> BUILD[FE docker build args + runtime]
-  BUILD --> FE[frontend container]
+  BE_ENV --> BE[backend recreate]
+  FE_ENV --> FE[frontend recreate / rebuild if NEXT_PUBLIC]
+```
+
+### Logins (on the lab host)
+
+```bash
+# Vault UI (userpass)
+cat /home/ienetworks/workspace/tools/docker-devops/vault/secrets/operator-login.txt
+
+# Secrets Room (ROOM_BASIC_*)
+grep '^ROOM_BASIC_' /home/ienetworks/workspace/tools/docker-devops/secrets-room/.env
+```
+
+Vault UI method: **Username** → user `operator` (policy `collaboration-admin`).  
+Do **not** paste the root token into the browser unless you intend full admin.
+
+### KV paths (what to edit in Vault)
+
+| Path in UI | Disk file after apply |
+|------------|------------------------|
+| `secret/collaboration/backend` | `collaboration/env/backend.env` |
+| `secret/collaboration/frontend` | `collaboration/env/frontend.env` |
+| `secret/collaboration/compose` | `collaboration/.env.docker` |
+| `secret/collaboration/notification` | `notification/env/notification.env` |
+
+### Day-to-day workflow
+
+1. **Change a secret** in Vault UI under `secret` → `collaboration` → `backend` / `frontend` / …
+2. Open **Secrets Room** → Collaboration → pick Backend/Frontend → confirm Vault vs file (drift / synced).
+3. Click **Apply** (or Jenkins → `apply-vault-env` → `TARGET=backend|frontend|notification|all`).
+4. Job writes env files and **recreates** containers.  
+   If you changed `NEXT_PUBLIC_*`, also **rebuild** the frontend image (`FORCE_REBUILD=1` or new SHA).
+
+### Keep Vault / Room healthy
+
+```bash
+cd /home/ienetworks/workspace/tools/docker-devops
+docker compose -f vault/docker-compose.yml up -d
+./vault/scripts/unseal.sh                          # after every Vault restart
+docker compose -f secrets-room/docker-compose.yml up -d
+
+# Seed / refresh Vault from current env files
+./scripts/vault-import-from-env.sh
 ```
 
 - Runtime secrets: Vault → `apply-vault-env` → env files → recreate containers  
-- **Never commit** `collaboration/env/*.env` or `jenkins/secrets/*`  
+- **Never commit** `collaboration/env/*.env`, `vault/secrets/*`, or `jenkins/secrets/*`  
 - FE public config must be present at **image build** time
 
 ---
@@ -424,9 +474,18 @@ Open http://172.16.50.39:3000 and log in. Lab FE/BE use **plain JSON** (see [Enc
 
 1. `bash scripts/warm-lab-base.sh` once  
 2. Prefer `scripts/build-images-on-host.sh <service>` for heavy `npm` / `next build`  
-3. Jenkins `ACTION=recreate` only  
-4. Same git SHA already in registry → build stage **skips**  
-5. Env/Dockerfile-only FE changes: `FORCE_REBUILD=1` on host build
+3. Jenkins `ACTION=recreate` only when the image tag is already good  
+4. Same git SHA already in registry → build stage **skips** entirely  
+5. Env/Dockerfile-only FE changes: `FORCE_REBUILD=1` on host build  
+
+**Caching (enabled):** Jenkins builds use **BuildKit** with:
+
+- `--cache-from <image>:latest` + inline cache metadata on push  
+- Docker cache mounts for `/root/.npm` and (frontend) `/app/.next/cache`  
+
+So unchanged `package-lock.json` reuses the deps layer, and incremental FE code changes reuse Next’s compile cache. First build after enabling cache is still full; the **second** build of the same app is the fast one.
+
+`DOCKER_BUILDKIT=0` was the old lab default (slow, no mounts) — do not turn it back on.
 
 ---
 
@@ -489,7 +548,9 @@ Do not hand-edit job config in the Jenkins UI if you want Git to stay source of 
 | `image not found` on deploy | Build once into registry (`build-and-start` or host script) |
 | FE `.reduce` / “not iterable” / login crashes | Encryption mismatch — BE must be plain (`node dist/main` + `NODE_ENV=development`); FE `ENCRYPTION_DISABLED=true` |
 | Device signed out after DB copy | `TRUNCATE device_sessions;` on lab DB |
-| Registry push connection refused | `docker compose -f registry/docker-compose.yml up -d` |
+| Vault UI down / sealed | `docker compose -f vault/docker-compose.yml up -d && ./vault/scripts/unseal.sh` |
+| Secrets Room down | `docker compose -f secrets-room/docker-compose.yml up -d` |
+| Vault “address already in use” crash loop | Compose must use `user: vault` + `entrypoint: ["vault"]` (not docker-entrypoint setcap) |
 | Jenkins job XML stale | `sync-jobs.sh` after editing `jenkins/jobs/*` |
 
 **Manual webhook test (on server):**

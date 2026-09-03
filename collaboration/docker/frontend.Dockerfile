@@ -1,9 +1,11 @@
+# syntax=docker/dockerfile:1
 # Lab frontend — FROM prebuilt lab-node (no apt). Fast after warm-lab-base.sh.
 ARG LAB_NODE=127.0.0.1:5001/lab-node:20
 FROM ${LAB_NODE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json* .npmrc* ./
-RUN npm config set fetch-timeout 600000 fetch-retries 5 \
+RUN --mount=type=cache,target=/root/.npm \
+  npm config set fetch-timeout 600000 fetch-retries 5 \
   && npm ci --no-audit --no-fund --legacy-peer-deps 2>/dev/null \
     || npm install --no-audit --no-fund --legacy-peer-deps
 
@@ -50,7 +52,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN mkdir -p public
-RUN NODE_OPTIONS=--max-old-space-size=4096 npx next build
+# Persist Next compile cache across builds (huge win on incremental changes).
+RUN --mount=type=cache,target=/app/.next/cache \
+    --mount=type=cache,target=/root/.npm \
+  NODE_OPTIONS=--max-old-space-size=4096 npx next build
 
 FROM ${LAB_NODE} AS runner
 WORKDIR /app

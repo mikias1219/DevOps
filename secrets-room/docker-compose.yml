@@ -8,8 +8,9 @@ services:
     container_name: selamnew-secrets-room
     restart: unless-stopped
     ports:
-      # Internal only — operator UI is HashiCorp Vault :8200
-      - "127.0.0.1:8300:8300"
+      # Lab LAN: open Secrets Room for env compare/apply (basic auth required).
+      # HashiCorp Vault UI remains the primary secret editor on :8200.
+      - "${SECRETS_ROOM_HOST_BIND:-0.0.0.0}:8300:8300"
     env_file:
       - ./.env
     environment:

@@ -14,7 +14,7 @@ if docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 
 log "Building ${IMAGE} (one-time apt — may take 20–40m on slow lab network)"
-DOCKER_BUILDKIT=0 docker build \
+DOCKER_BUILDKIT=1 docker build \
   -f "${ROOT}/collaboration/docker/lab-node.Dockerfile" \
   -t "$IMAGE" \
   "${ROOT}/collaboration/docker"

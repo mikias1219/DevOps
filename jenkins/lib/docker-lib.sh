@@ -298,11 +298,25 @@ ensure_lab_node_base() {
     return 0
   fi
   echo "==> Building lab-node base ONCE (apt tools — slow first time only)"
-  DOCKER_BUILDKIT=0 docker build \
+  DOCKER_BUILDKIT=1 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/lab-node.Dockerfile" \
     -t "$_img" \
     "${DEVOPS_ROOT}/collaboration/docker"
   docker push "$_img" 2>/dev/null || true
+}
+
+# BuildKit + pull :latest for layer reuse + inline cache for next builds.
+# Extra args are passed to `docker build` (must include -f, -t's, context).
+_docker_build_with_cache() {
+  _cache_image="$1"
+  shift
+  export DOCKER_BUILDKIT=1
+  echo "==> BuildKit cache: pulling ${_cache_image}:latest (if present)"
+  docker pull "${_cache_image}:latest" >/dev/null 2>&1 || true
+  docker build \
+    --build-arg BUILDKIT_INLINE_CACHE=1 \
+    --cache-from "${_cache_image}:latest" \
+    "$@"
 }
 
 _frontend_public_arg() {
@@ -325,8 +339,8 @@ build_and_push_collaboration_backend() {
     return 0
   fi
   ensure_lab_node_base
-  echo "==> docker build ${_image}:${_sha} (no apt — uses lab-node base)"
-  DOCKER_BUILDKIT=0 docker build \
+  echo "==> docker build ${_image}:${_sha} (BuildKit cache — uses lab-node base)"
+  _docker_build_with_cache "$_image" \
     -f "${DEVOPS_ROOT}/collaboration/docker/backend.Dockerfile" \
     --build-arg "LAB_NODE=$(lab_node_image)" \
     -t "${_image}:${_sha}" \
@@ -383,9 +397,9 @@ build_and_push_collaboration_frontend() {
     return 0
   fi
   ensure_lab_node_base
-  echo "==> docker build ${_image}:${_sha} (no apt — uses lab-node base)"
+  echo "==> docker build ${_image}:${_sha} (BuildKit cache — uses lab-node base)"
   echo "    ENCRYPTION_DISABLED=${_enc_disabled} ORG_AND_EMP_URL=${_org_emp}"
-  DOCKER_BUILDKIT=0 docker build \
+  _docker_build_with_cache "$_image" \
     -f "${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile" \
     --build-arg "LAB_NODE=$(lab_node_image)" \
     --build-arg "NEXT_PUBLIC_COLLABORATION_URL=${_api_v1}" \
@@ -630,8 +644,8 @@ build_and_push_collaboration_notification() {
     return 0
   fi
   ensure_lab_node_base
-  echo "==> docker build ${_image}:${_sha} (no apt — uses lab-node base)"
-  DOCKER_BUILDKIT=0 docker build \
+  echo "==> docker build ${_image}:${_sha} (BuildKit cache — uses lab-node base)"
+  _docker_build_with_cache "$_image" \
     -f "${DEVOPS_ROOT}/notification/docker/notification.Dockerfile" \
     --build-arg "LAB_NODE=$(lab_node_image)" \
     -t "${_image}:${_sha}" \

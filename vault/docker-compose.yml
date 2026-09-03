@@ -1,7 +1,6 @@
 # Vault — file storage + UI (not -dev)
-# Start: docker compose -f vault/docker-compose.yml up -d
+# Start: docker compose -f vault/docker-compose.yml up -d && ./vault/scripts/unseal.sh
 # First time: ./vault/scripts/bootstrap.sh
-# After recreate: ./vault/scripts/unseal.sh (or cron)
 
 name: vault
 
@@ -10,6 +9,10 @@ services:
     image: hashicorp/vault:1.17
     container_name: selamnew-vault
     restart: unless-stopped
+    # Skip docker-entrypoint.sh setcap race (binds :8200 twice on this host).
+    user: vault
+    entrypoint: ["vault"]
+    command: ["server", "-config=/vault/config/vault.hcl"]
     ports:
       - "0.0.0.0:8200:8200"
     cap_add:
@@ -20,10 +23,6 @@ services:
       - ./config/vault.hcl:/vault/config/vault.hcl:ro
       - vault_data:/vault/file
       - ./secrets:/vault/secrets:ro
-      - ./scripts/docker-entrypoint-unseal.sh:/usr/local/bin/docker-entrypoint-unseal.sh:ro
-    # Auto-unseal after restart when vault/secrets/vault-keys.env exists
-    entrypoint: ["/bin/sh", "/usr/local/bin/docker-entrypoint-unseal.sh"]
-    command: ["server", "-config=/vault/config/vault.hcl"]
 
 volumes:
   vault_data:
