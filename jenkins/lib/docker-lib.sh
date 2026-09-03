@@ -359,20 +359,32 @@ build_and_push_collaboration_frontend() {
   _fb_bucket="$(_frontend_public_arg NEXT_PUBLIC_STORAGE_BUCKET "")"
   _fb_sender="$(_frontend_public_arg NEXT_PUBLIC_MESSAGE_SENDER_ID "")"
   _fb_app="$(_frontend_public_arg NEXT_PUBLIC_APP_ID "")"
+  _org_emp="$(_frontend_public_arg NEXT_PUBLIC_ORG_AND_EMP_URL "")"
+  _enc_disabled="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_DISABLED true)"
+  _enc_key="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_KEY "")"
+  _enc_salt="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_SALT "")"
+  _enc_iv="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_IV "")"
   if [ -z "$_fb_key" ]; then
     echo "FATAL: NEXT_PUBLIC_API_KEY is empty in collaboration/env/frontend.env" >&2
     echo "Next.js prerender calls Firebase at build time. Add the key (do not commit it)." >&2
     return 1
   fi
+  if [ -z "$_org_emp" ]; then
+    echo "FATAL: NEXT_PUBLIC_ORG_AND_EMP_URL is empty in collaboration/env/frontend.env" >&2
+    echo "Login posts credentials to org-emp; bake this URL into the Next.js build." >&2
+    return 1
+  fi
   ensure_local_registry
-  if _registry_has_tag "$_image" "$_sha"; then
+  if [ "${FORCE_REBUILD:-}" != "1" ] && _registry_has_tag "$_image" "$_sha"; then
     echo "==> skip build: ${_image}:${_sha} already in registry (FAST PATH)"
+    echo "    (set FORCE_REBUILD=1 to rebuild when only bake-time env/Dockerfile changed)"
     env_file_set "$ENV_FILE" FRONTEND_IMAGE_TAG "$_sha"
     echo "FRONTEND_IMAGE_TAG=${_sha}"
     return 0
   fi
   ensure_lab_node_base
   echo "==> docker build ${_image}:${_sha} (no apt — uses lab-node base)"
+  echo "    ENCRYPTION_DISABLED=${_enc_disabled} ORG_AND_EMP_URL=${_org_emp}"
   DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile" \
     --build-arg "LAB_NODE=$(lab_node_image)" \
@@ -388,6 +400,11 @@ build_and_push_collaboration_frontend() {
     --build-arg "NEXT_PUBLIC_STORAGE_BUCKET=${_fb_bucket}" \
     --build-arg "NEXT_PUBLIC_MESSAGE_SENDER_ID=${_fb_sender}" \
     --build-arg "NEXT_PUBLIC_APP_ID=${_fb_app}" \
+    --build-arg "NEXT_PUBLIC_ORG_AND_EMP_URL=${_org_emp}" \
+    --build-arg "NEXT_PUBLIC_ENCRYPTION_DISABLED=${_enc_disabled}" \
+    --build-arg "NEXT_PUBLIC_ENCRYPTION_KEY=${_enc_key}" \
+    --build-arg "NEXT_PUBLIC_ENCRYPTION_SALT=${_enc_salt}" \
+    --build-arg "NEXT_PUBLIC_ENCRYPTION_IV=${_enc_iv}" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
     -t "${_image}:latest" \
