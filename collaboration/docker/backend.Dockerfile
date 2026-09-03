@@ -14,9 +14,10 @@ RUN npm run build
 
 FROM ${LAB_NODE} AS runner
 WORKDIR /app
-ENV NODE_ENV=production
+# NODE_ENV comes from compose env_file (lab: development → no API encryption).
+# Do not use `npm run start:prod` — it hardcodes NODE_ENV=production.
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 EXPOSE 5000
-CMD ["npm", "run", "start:prod"]
+CMD ["node", "dist/main"]

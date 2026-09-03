@@ -79,6 +79,10 @@ services:
         condition: service_healthy
     env_file:
       - ./env/backend.env
+    # Do NOT use `npm run start:prod` — that script forces NODE_ENV=production and
+    # turns on API body encryption. Lab FE is HTTP + ENCRYPTION_DISABLED=true, so
+    # BE must honor env/backend.env (NODE_ENV=development) → plain JSON.
+    command: ["node", "dist/main"]
     environment:
       APP_PORT: "5000"
       APP_PUBLIC_BASE_URL: http://172.16.50.39:5000

@@ -343,10 +343,12 @@ Opening the lab as `http://172.16.50.39:3000` means encryption **must be off** o
 | Lab over **HTTP** IP (`172.16.50.39`) | Lab BE uses `NODE_ENV=development` → plain | **`NEXT_PUBLIC_ENCRYPTION_DISABLED=true`** (required) |
 | HTTPS / production | Yes | `NEXT_PUBLIC_ENCRYPTION_DISABLED=false` + matching KEY/SALT/IV |
 
+**Lab gotcha:** `npm run start:prod` forces `NODE_ENV=production` even if `backend.env` says `development`. Compose must run `node dist/main` so the env file wins. Otherwise BE encrypts, FE does not → `f.reduce is not a function` / “not iterable”.
+
 Mismatch symptoms:
 
 - FE encrypt on, BE plain → `importKey` crash on HTTP, or weird payloads  
-- FE encrypt off, BE encrypt on → `(x ?? []) is not iterable` (ciphertext object treated as data)
+- FE encrypt off, BE encrypt on → `(x ?? []) is not iterable` / `.reduce is not a function` (ciphertext `{ data }` treated as a list)
 
 Rebuild FE after flipping the flag:
 
