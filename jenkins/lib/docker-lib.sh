@@ -360,7 +360,7 @@ build_and_push_collaboration_frontend() {
   _fb_sender="$(_frontend_public_arg NEXT_PUBLIC_MESSAGE_SENDER_ID "")"
   _fb_app="$(_frontend_public_arg NEXT_PUBLIC_APP_ID "")"
   _org_emp="$(_frontend_public_arg NEXT_PUBLIC_ORG_AND_EMP_URL "")"
-  _enc_disabled="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_DISABLED true)"
+  _enc_disabled="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_DISABLED false)"
   _enc_key="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_KEY "")"
   _enc_salt="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_SALT "")"
   _enc_iv="$(_frontend_public_arg NEXT_PUBLIC_ENCRYPTION_IV "")"

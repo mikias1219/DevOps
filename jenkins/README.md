@@ -49,6 +49,10 @@ Both app repos, **push**, content type **application/json**:
 Token file: `secrets/github-webhook-collab-token.txt`  
 Only branch **`develop`**. Do not use `/github-webhook/`.
 
+GWT 2.4+ uses `PipelineTriggersJobProperty` (not the removed `JobPropertyImpl`).
+`bin/sync-jobs.sh` writes that property and injects `triggers { GenericTrigger(...) }`
+into the pipeline script so the next build does not wipe webhook config.
+
 DevOps repo uses a **different** token → `sync-devops-control-plane`.
 
 ## Register jobs after a Jenkinsfile change

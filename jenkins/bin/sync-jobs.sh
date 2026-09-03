@@ -182,28 +182,66 @@ sync_gwt_job() {
     return 1
   fi
 
+  # GWT ≥2.x no longer ships JobPropertyImpl. Pipeline jobs must use
+  # PipelineTriggersJobProperty + GenericTrigger, and the same trigger must
+  # live in the pipeline script or the next build wipes job properties.
   local script_b64
   script_b64="$(base64 -w0 "$jenkinsfile")"
 
   python3 - "$script_b64" "$description" "$token" "$filter_text" "$filter_expr" >"$out_xml" <<'PY'
-import base64, html, sys
+import base64, html, re, sys
+
 script = base64.b64decode(sys.argv[1]).decode()
 desc = sys.argv[2]
 token = sys.argv[3]
 filter_text = sys.argv[4] if len(sys.argv) > 4 else ""
 filter_expr = sys.argv[5] if len(sys.argv) > 5 else ""
+
+# Escape for embedding inside a Groovy single-quoted string.
+token_groovy = token.replace("\\", "\\\\").replace("'", "\\'")
+filter_text_groovy = filter_text.replace("\\", "\\\\").replace("'", "\\'")
+filter_expr_groovy = filter_expr.replace("\\", "\\\\").replace("'", "\\'")
+
+triggers_block = f"""
+  triggers {{
+    GenericTrigger(
+      genericVariables: [
+        [key: 'gh_ref', value: '$.ref'],
+        [key: 'gh_after', value: '$.after'],
+        [key: 'gh_repo', value: '$.repository.full_name'],
+        [key: 'gh_repo_name', value: '$.repository.name'],
+      ],
+      causeString: 'GitHub push webhook ($gh_repo $gh_ref)',
+      token: '{token_groovy}',
+      printContributedVariables: true,
+      printPostContent: false,
+      silentResponse: false,
+      regexpFilterText: '{filter_text_groovy}',
+      regexpFilterExpression: '{filter_expr_groovy}'
+    )
+  }}
+"""
+
+# Avoid double-inject on re-sync.
+if "GenericTrigger(" not in script:
+  script, n = re.subn(
+      r"(pipeline\s*\{\s*\n\s*agent\s+any\s*\n)",
+      r"\1" + triggers_block,
+      script,
+      count=1,
+  )
+  if n != 1:
+    raise SystemExit(
+        "sync_gwt_job: could not inject GenericTrigger after 'agent any'"
+    )
+
 esc = html.escape(script)
 desc_esc = html.escape(desc.encode("ascii", "replace").decode("ascii"))
 token_esc = html.escape(token)
-print(f"""<?xml version='1.1' encoding='UTF-8'?>
-<flow-definition plugin="workflow-job">
-  <actions/>
-  <description>{desc_esc}</description>
-  <keepDependencies>false</keepDependencies>
-  <properties>
-    <org.jenkinsci.plugins.gwt.JobPropertyImpl plugin="generic-webhook-trigger">
-      <triggers>
-        <org.jenkinsci.plugins.gwt.GenericTrigger>
+filter_text_esc = html.escape(filter_text)
+filter_expr_esc = html.escape(filter_expr)
+
+generic_trigger_xml = f"""        <org.jenkinsci.plugins.gwt.GenericTrigger plugin="generic-webhook-trigger">
           <spec></spec>
           <genericVariables>
             <org.jenkinsci.plugins.gwt.GenericVariable>
@@ -235,8 +273,8 @@ print(f"""<?xml version='1.1' encoding='UTF-8'?>
               <defaultValue></defaultValue>
             </org.jenkinsci.plugins.gwt.GenericVariable>
           </genericVariables>
-          <regexpFilterText>{html.escape(filter_text)}</regexpFilterText>
-          <regexpFilterExpression>{html.escape(filter_expr)}</regexpFilterExpression>
+          <regexpFilterText>{filter_text_esc}</regexpFilterText>
+          <regexpFilterExpression>{filter_expr_esc}</regexpFilterExpression>
           <printContributedVariables>true</printContributedVariables>
           <printPostContent>false</printPostContent>
           <causeString>GitHub push webhook ($gh_repo $gh_ref)</causeString>
@@ -245,9 +283,19 @@ print(f"""<?xml version='1.1' encoding='UTF-8'?>
           <silentResponse>false</silentResponse>
           <overrideQuietPeriod>false</overrideQuietPeriod>
           <shouldNotFlatten>false</shouldNotFlatten>
-        </org.jenkinsci.plugins.gwt.GenericTrigger>
+        </org.jenkinsci.plugins.gwt.GenericTrigger>"""
+
+print(f"""<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>{desc_esc}</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+      <triggers>
+{generic_trigger_xml}
       </triggers>
-    </org.jenkinsci.plugins.gwt.JobPropertyImpl>
+    </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
   </properties>
   <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
     <script>{esc}</script>
