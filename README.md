@@ -1,4 +1,4 @@
-# Selamnew Collaboration — DevOps Lab (End-to-End)
+# Selamnew Collaboration — DevOps Lab
 
 This folder is the **control plane**. App source lives next to it; DevOps does **not** edit app repos.
 
@@ -12,64 +12,7 @@ This folder is the **control plane**. App source lives next to it; DevOps does *
 **Lab host:** `172.16.50.39` (`ienetworks`)  
 **Idea:** same pipeline *shape* as production Jenkinsfiles, but images go to a **local registry** and deploy with **Compose** on one VM (not Docker Hub + Swarm).
 
----
-
-## Big picture
-
-```mermaid
-flowchart TB
-  subgraph developers [Developers]
-    FE_DEV[Push frontend develop]
-    BE_DEV[Push backend develop]
-    OPS_DEV[Push docker-devops main]
-  end
-
-  subgraph github [GitHub]
-    FE_REPO[selamnew-collaboration-fe]
-    BE_REPO[selamnew-collaboration-backend]
-    OPS_REPO[DevOps / docker-devops]
-  end
-
-  subgraph ingress [Lab ingress]
-    TS[Tailscale Funnel<br/>selamnewcollab.tail020266.ts.net]
-    NGX[Nginx :80]
-    GWT["/generic-webhook-trigger/invoke?token=…"]
-  end
-
-  subgraph jenkins [Jenkins :8080]
-    ROUTER[github-push-collaboration]
-    SYNC[sync-devops-control-plane]
-    JOB_FE[collaboration-frontend]
-    JOB_BE[collaboration-backend]
-    JOB_NES[collaboration-notification]
-    VAULT_JOB[apply-vault-env]
-  end
-
-  subgraph host [Docker on host]
-    REG[(Registry :5001)]
-    COMPOSE[Compose stacks]
-    FE_CTR[frontend :3000]
-    BE_CTR[backend :5000]
-    DB[(Postgres :5434)]
-  end
-
-  FE_DEV --> FE_REPO --> TS
-  BE_DEV --> BE_REPO --> TS
-  OPS_DEV --> OPS_REPO --> TS
-  TS --> NGX --> GWT
-  GWT -->|collab token| ROUTER
-  GWT -->|devops token| SYNC
-  ROUTER -->|develop + fe repo| JOB_FE
-  ROUTER -->|develop + be repo| JOB_BE
-  ROUTER -->|develop + nes repo| JOB_NES
-  SYNC -->|git pull + sync-jobs.sh| jenkins
-  JOB_FE --> REG --> COMPOSE --> FE_CTR
-  JOB_BE --> REG --> COMPOSE --> BE_CTR
-  COMPOSE --> DB
-  VAULT_JOB -->|env files| COMPOSE
-```
-
-**Jenkins never runs Nest/Next itself.** It drives **host Docker** through `/var/run/docker.sock`, using scripts in `jenkins/lib/docker-lib.sh`.
+Jenkins never runs Nest/Next itself. It drives **host Docker** through `/var/run/docker.sock`, using `jenkins/lib/docker-lib.sh`.
 
 ---
 
@@ -79,17 +22,296 @@ flowchart TB
 |---------|-----|--------|
 | Frontend | http://172.16.50.39:3000 | Next.js |
 | Backend API | http://172.16.50.39:5000/api/v1/health | Nest |
-| Notification | http://172.16.50.39:8006/api/v1/health | NES |
+| Notification | http://172.16.50.39:8006/api/v1/health | NES (separate compose) |
 | Jenkins | http://172.16.50.39:8080 | `admin` / see `jenkins/secrets/admin.env` |
 | Adminer (collab DB) | http://172.16.50.39:8083 | Server `db`, DB `selamnew-collab`, user `postgres` |
-| Adminer (NES DB) | http://172.16.50.39:8084 | |
+| Adminer (NES DB) | http://172.16.50.39:8084 | Separate Postgres |
 | Vault UI | http://172.16.50.39:8200/ui | |
 | Secrets Room | http://172.16.50.39:8300 | Compare / apply Vault → env |
 | Portainer | https://172.16.50.39:9443 | |
 | Local registry | `127.0.0.1:5001` | On the server only |
 | Public webhooks | `https://selamnewcollab.tail020266.ts.net/generic-webhook-trigger/invoke?token=…` | Funnel → Nginx → Jenkins |
 
-Compose publishes (collaboration stack): FE `3000`, BE `5000`, Postgres `5434`, Redis `6381`, Adminer `8083`, ES `9200`.
+Collaboration compose publishes: FE `3000`, BE `5000`, Postgres `5434`, Redis `6381`, Adminer `8083`, ES `9200`.
+
+---
+
+## How the running apps talk
+
+Two kinds of addressing:
+
+1. **Browser / cross-stack** → host IP `172.16.50.39` (the browser is outside Docker DNS).
+2. **Inside collaboration Compose** → service names (`db`, `redis`, `elasticsearch`).
+
+```mermaid
+flowchart LR
+  Browser["Browser"] -->|"HTTP :3000"| FE["frontend"]
+  Browser -->|"HTTP + Socket.IO :5000"| BE["backend"]
+  FE -.->|"baked NEXT_PUBLIC_* host IP"| BE
+  BE -->|"DNS db:5432"| DB["Postgres"]
+  BE -->|"DNS redis:6379"| Redis["Redis"]
+  BE -->|"DNS elasticsearch:9200"| ES["Elasticsearch"]
+  BE -->|"host IP :8006"| NES["notification"]
+  NES -->|"host IP :5000"| BE
+```
+
+### Who talks to whom
+
+| From | To | How | Typical URL / DNS |
+|------|----|-----|-------------------|
+| Browser | Frontend | HTTP | `http://172.16.50.39:3000` |
+| Browser | Backend | REST + Socket.IO | `http://172.16.50.39:5000` path `/api/v1` (socket path `/api/v1/socket.io`) |
+| Frontend container | Backend | Browser uses **baked** `NEXT_PUBLIC_*` host URLs (not Docker DNS) | `NEXT_PUBLIC_COLLABORATION_URL=http://172.16.50.39:5000/api/v1` |
+| Backend | Postgres / Redis / ES | Compose DNS | `db:5432`, `redis:6379`, `http://elasticsearch:9200` |
+| Backend | Notification | Host IP + bearer token | `NOTIFICATION_SERVICE_URL=http://172.16.50.39:8006/api/v1` |
+| Notification | Backend | Host IP + bearer token | `COLLABORATION_SERVICE_URL=http://172.16.50.39:5000/api/v1` |
+| You | Adminer | HTTP | `:8083` → connects to Compose service `db` |
+
+### Ports (host → container)
+
+| Service | Host port | Container |
+|---------|-----------|-----------|
+| frontend | `3000` | `3001` |
+| backend | `5000` | `5000` |
+| Postgres (collab) | `5434` | `5432` |
+| Redis | `6381` | `6379` |
+| Elasticsearch | `127.0.0.1:9200` | `9200` |
+| Adminer (collab) | `8083` | `8080` |
+| notification | `8006` | `8006` |
+| Adminer (NES) | `8084` | `8080` |
+
+NES is a **separate** Compose project (`notification/`). It does not share collab’s Postgres.
+
+### Env vars that wire FE ↔ BE
+
+Set in `collaboration/env/*.env` (and FE also **baked** at image build):
+
+| Variable | Where | Lab value pattern |
+|----------|--------|-------------------|
+| `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_COLLABORATION_URL` | frontend.env + FE build-args | `http://172.16.50.39:5000/api/v1` |
+| `NEXT_PUBLIC_WS_URL` / `NEXT_PUBLIC_COLLABORATION_SOCKET_URL` | frontend.env | `http://172.16.50.39:5000` |
+| `NEXT_PUBLIC_COLLABORATION_SOCKET_PATH` | frontend.env | `/api/v1/socket.io` |
+| `NEXT_PUBLIC_APP_URL` | frontend.env | `http://172.16.50.39:3000` |
+| `COLLABORATION_FRONT_URL` | backend.env + compose | `http://172.16.50.39:3000` |
+| `APP_PUBLIC_BASE_URL` | backend.env + compose | `http://172.16.50.39:5000` |
+| `DB_HOST` / `REDIS_HOST` / `ELASTICSEARCH_NODE` | compose overrides | `db` / `redis` / `http://elasticsearch:9200` |
+
+`scripts/configure-lab-communication.sh` patches these to `${SERVER_IP:-172.16.50.39}` before Vault import.
+
+---
+
+## How Jenkins talks to the host
+
+Jenkins is a container. It does **not** compile or run the apps inside its own filesystem for production traffic. It asks the **host Docker daemon** to build, push, and recreate app containers.
+
+```mermaid
+flowchart TB
+  subgraph jenkinsCtr [Jenkins container :8080]
+    Jobs[Pipeline jobs]
+    Lib["/var/devops/jenkins/lib/docker-lib.sh"]
+    Jobs --> Lib
+  end
+
+  Sock["/var/run/docker.sock"]
+  Devops["/var/devops = docker-devops tree"]
+  Apps["COLLABORATION_SOURCE = app git trees"]
+  HostDocker[Host Docker daemon]
+  Reg["Registry 127.0.0.1:5001"]
+  Compose[Compose stacks on host]
+
+  Lib --> Sock
+  Sock --> HostDocker
+  HostDocker --> Reg
+  HostDocker --> Compose
+  Devops -.-> Jobs
+  Apps -.-> Lib
+```
+
+### Mounts that make that possible
+
+From `jenkins/docker-compose.yml`:
+
+| Mount | Why |
+|-------|-----|
+| `/var/run/docker.sock` | Build/push/compose on the **host** |
+| `..:/var/devops` | Jenkinsfiles, compose files, `docker-lib.sh`, scripts |
+| `COLLABORATION_SOURCE` → app tree | `git pull` + Docker build context for FE/BE/NES |
+| `./secrets` → `/var/devops/jenkins/secrets` | Admin + webhook tokens |
+| `group_add: DOCKER_GID` | Container user can use the socket |
+
+Pipelines set `DEVOPS_ROOT=/var/devops` and source:
+
+```bash
+. /var/devops/jenkins/lib/docker-lib.sh
+```
+
+Shared helpers: `build_and_push_collaboration_*` → `docker push 127.0.0.1:5001/...` → `deploy_*_service` (`compose up --no-deps --force-recreate`) → smoke curl.
+
+---
+
+## How a push becomes a running container
+
+```mermaid
+flowchart TB
+  GH["GitHub push develop"] --> Funnel["Tailscale Funnel + Nginx :80"]
+  Funnel --> GWT["Generic Webhook Trigger"]
+  GWT -->|"collab token"| Router["github-push-collaboration"]
+  GWT -->|"devops token"| Sync["sync-devops-control-plane"]
+  Router -->|"wait: false"| AppJob["collaboration-frontend / backend / notification"]
+  AppJob -->|"source docker-lib.sh"| Lib["docker-lib.sh"]
+  Lib --> Reg["Registry :5001"]
+  Lib -->|"compose force-recreate"| Stack["Host Compose"]
+  Sync --> SyncJobs["sync-jobs.sh"]
+  SyncJobs -->|"refresh job XML + GWT"| JenkinsJobs[Jenkins job config]
+```
+
+### Sequence (app deploy)
+
+```mermaid
+sequenceDiagram
+  participant You as You or GitHub
+  participant J as Jenkins app job
+  participant Lib as docker-lib.sh
+  participant Reg as Registry :5001
+  participant Host as Host Compose
+
+  You->>J: ACTION=build-and-start or update-from-github
+  J->>Lib: source docker-lib.sh
+  alt update-from-github
+    Lib->>Lib: git pull app repo develop
+  end
+  Lib->>Lib: ensure lab-node base exists
+  alt image SHA already in registry
+    Lib-->>J: skip docker build
+  else
+    Lib->>Lib: docker build
+    Lib->>Reg: docker push :sha :branch :latest
+    Lib->>Lib: write IMAGE_TAG into .env.docker
+  end
+  Lib->>Host: compose up --no-deps --force-recreate SERVICE
+  Lib->>Lib: smoke health / HTTP 200
+```
+
+**Frontend bake-time:** `NEXT_PUBLIC_*` are Docker **build-args**. Changing them needs a **rebuild** (`FORCE_REBUILD=1` or new git SHA), not only `recreate`.  
+**Backend runtime:** most secrets come from `collaboration/env/backend.env` at container start.
+
+---
+
+## Jenkins jobs — who listens, who they talk to
+
+| Job | Listens to | Talks to | Outcome |
+|-----|------------|----------|---------|
+| `github-push-collaboration` | GitHub collab webhook, **`develop` only** | Downstream app jobs with `wait: false` | Starts FE / BE / NES deploy without blocking |
+| `collaboration-frontend` | Router or manual `ACTION` | `build_and_push_collaboration_frontend` → registry → `deploy_collaboration_service frontend` | FE on `:3000` |
+| `collaboration-backend` | Router or manual `ACTION` | backend build/deploy + `ensure_collaboration_infra` | BE on `:5000` |
+| `collaboration-notification` | Router or manual `ACTION` | NES build/deploy + notification infra | NES on `:8006` |
+| `sync-devops-control-plane` | DevOps repo webhook | `git pull` control plane + `sync-jobs.sh` | Job XML / GWT refreshed; **no** app image rebuild |
+| `apply-vault-env` | You / Secrets Room | Vault → `env/*.env` → recreate containers | Secrets live in running stacks |
+
+### Router matching (`github-push-collaboration`)
+
+| Repo name (case-insensitive) | Downstream job |
+|------------------------------|----------------|
+| `selamnew-collaboration-fe` | `collaboration-frontend` |
+| `selamnew-collaboration-backend` | `collaboration-backend` |
+| `notification-and-email-service` | `collaboration-notification` |
+
+Only `refs/heads/develop`. Downstream uses `wait: false` so a long BE build does not block an FE webhook.
+
+### `ACTION` parameter (app jobs)
+
+| ACTION | `git pull`? | Build image? | Deploy? | Typical use |
+|--------|-------------|--------------|---------|-------------|
+| `start` | no | no | yes | Start stopped container |
+| `stop` | no | no | stop | Stop one service |
+| `restart` / `recreate` | no | no | recreate | Fast redeploy **existing** image tag |
+| `build-and-start` | no | yes (local tree) | yes | First build / force from current tree |
+| `update-from-github` | yes | yes | yes | What the **webhook** uses after push |
+
+### Why Jenkins helps
+
+- One UI for build + deploy + logs (same stage story as production)
+- Webhooks remove “SSH in and remember compose commands”
+- Shared `docker-lib.sh` keeps FE/BE/NES behavior aligned
+- Image skip-by-SHA keeps rebuilds short when the commit did not change
+- Control-plane sync updates pipelines without touching app repos
+
+### Webhook tokens (two jobs, two tokens)
+
+| Token file | Job |
+|------------|-----|
+| `jenkins/secrets/github-webhook-collab-token.txt` | `github-push-collaboration` |
+| `jenkins/secrets/github-webhook-token.txt` | `sync-devops-control-plane` |
+
+Default lab collab token (unless rotated): `selamnew-collab-push`.
+
+**GitHub webhook URL (app repos):**
+
+```text
+https://selamnewcollab.tail020266.ts.net/generic-webhook-trigger/invoke?token=<collab-token>
+```
+
+(or `http://172.16.50.39:8080/generic-webhook-trigger/invoke?token=<collab-token>` on LAN)
+
+- Content type: **application/json**
+- Event: **push**
+- Do **not** use `/github-webhook/` for this lab router
+
+GWT config is written by `jenkins/bin/sync-jobs.sh` as `PipelineTriggersJobProperty` + injected `triggers { GenericTrigger(...) }` (GWT 2.4+).
+
+After editing any file under `jenkins/jobs/`:
+
+```bash
+cd /home/ienetworks/workspace/tools/docker-devops
+export JENKINS_ADMIN_USER=admin JENKINS_ADMIN_PASS='…'   # from secrets/admin.env
+bash jenkins/bin/sync-jobs.sh
+```
+
+---
+
+## Secrets & Vault — how config reaches containers
+
+```mermaid
+flowchart LR
+  V[Vault KV] --> SR[Secrets Room :8300]
+  V --> APPLY[apply-vault-env]
+  SR --> APPLY
+  APPLY --> BE_ENV[collaboration/env/backend.env]
+  APPLY --> FE_ENV[collaboration/env/frontend.env]
+  APPLY --> NES_ENV[notification/env]
+  BE_ENV --> BE[backend container]
+  FE_ENV --> BUILD[FE docker build args + runtime]
+  BUILD --> FE[frontend container]
+```
+
+- Runtime secrets: Vault → `apply-vault-env` → env files → recreate containers  
+- **Never commit** `collaboration/env/*.env` or `jenkins/secrets/*`  
+- FE public config must be present at **image build** time
+
+---
+
+## Encryption (frontend ↔ backend)
+
+Browser **Web Crypto** (`crypto.subtle`) only works in a **secure context** (HTTPS or `localhost`).  
+Lab UI is `http://172.16.50.39:3000` → encryption **must be off** on the FE.
+
+| Environment | Backend encrypts? | Frontend setting |
+|-------------|-------------------|------------------|
+| Local `npm run dev` | No (`NODE_ENV=development`) | `NEXT_PUBLIC_ENCRYPTION_DISABLED=true` |
+| Lab over **HTTP** IP | No — BE must run with `NODE_ENV=development` | **`NEXT_PUBLIC_ENCRYPTION_DISABLED=true`** |
+| HTTPS / production | Yes | `NEXT_PUBLIC_ENCRYPTION_DISABLED=false` + matching KEY/SALT/IV |
+
+**Lab gotcha:** `npm run start:prod` forces `NODE_ENV=production` (API body encryption) even if `backend.env` says `development`. Compose runs `command: ["node", "dist/main"]` so the env file wins. Otherwise BE encrypts, FE does not → `.reduce is not a function` / “not iterable”.
+
+Mismatch symptoms:
+
+- FE encrypt on, BE plain → `importKey` crash on HTTP, or weird payloads  
+- FE encrypt off, BE encrypt on → ciphertext `{ data }` treated as a list
+
+```bash
+FORCE_REBUILD=1 ./scripts/build-images-on-host.sh frontend
+# Jenkins → collaboration-frontend → ACTION=recreate
+```
 
 ---
 
@@ -118,6 +340,7 @@ docker-devops/
     ├── bootstrap-learning-server.sh   First-time server setup
     ├── build-images-on-host.sh        Fast image build (skip Jenkins timeout)
     ├── warm-lab-base.sh               One-time lab-node base (no apt in app builds)
+    ├── configure-lab-communication.sh Patch FE/BE/NES URLs to SERVER_IP
     └── vault-*.sh                     Import / export secrets
 ```
 
@@ -150,216 +373,31 @@ Bootstrap typically:
 
 ### C. First images + deploy
 
-App containers need images in `127.0.0.1:5001`. Prefer a **one-time warm** then Jenkins (or host build).
-
 ```bash
-# On server — build lab-node once (apt tools cached forever after this)
 bash scripts/warm-lab-base.sh
 
-# Option 1 — Jenkins UI (learn the stages)
-#   http://172.16.50.39:8080
-#   collaboration-backend  → Build with Parameters → ACTION=build-and-start
-#   collaboration-frontend → Build with Parameters → ACTION=build-and-start
-#   collaboration-notification (optional) → same
+# Option 1 — Jenkins UI
+#   collaboration-backend  → ACTION=build-and-start
+#   collaboration-frontend → ACTION=build-and-start
+#   collaboration-notification (optional)
 
-# Option 2 — faster on a slow network (host build, then Jenkins only recreates)
+# Option 2 — host build, then Jenkins only recreates
 bash scripts/build-images-on-host.sh backend frontend
-# Then Jenkins → each job → ACTION=recreate   (~30–60s)
+# Then Jenkins → each job → ACTION=recreate
 ```
 
-### D. Verify access
+### D. Verify
 
 ```bash
 curl -sf http://172.16.50.39:5000/api/v1/health
 curl -sf -o /dev/null -w "%{http_code}\n" http://172.16.50.39:3000/
 ```
 
-Open http://172.16.50.39:3000 and log in (org-emp + Firebase).  
-Backend `NODE_ENV=production` **encrypts** API bodies; the FE image must be built with matching `NEXT_PUBLIC_ENCRYPTION_*` (see [Encryption](#encryption-frontend--backend)).
+Open http://172.16.50.39:3000 and log in. Lab FE/BE use **plain JSON** (see [Encryption](#encryption-frontend--backend)).
 
 ---
 
-## How a build works (image → registry → Compose)
-
-```mermaid
-sequenceDiagram
-  participant You as You / Webhook
-  participant J as Jenkins job
-  participant Lib as docker-lib.sh
-  participant Reg as Registry :5001
-  participant Host as Host Docker Compose
-
-  You->>J: ACTION=build-and-start or update-from-github
-  J->>Lib: source docker-lib.sh
-  alt update-from-github
-    Lib->>Lib: git pull app repo (develop)
-  end
-  Lib->>Lib: ensure lab-node base exists
-  alt image tag SHA already in registry
-    Lib-->>J: skip docker build (FAST PATH)
-  else
-    Lib->>Lib: docker build (FROM lab-node, no apt)
-    Lib->>Reg: docker push :sha :branch :latest
-    Lib->>Lib: write *_IMAGE_TAG into .env.docker
-  end
-  Lib->>Host: compose up --no-deps --force-recreate SERVICE
-  Lib->>Lib: smoke (health / HTTP 200)
-```
-
-**Frontend bake-time:** `NEXT_PUBLIC_*` (Firebase, URLs, encryption, org-emp) are **build-args**. Changing them needs a **rebuild** (`FORCE_REBUILD=1` or new git SHA), not only `recreate`.
-
-**Backend runtime:** most secrets come from `collaboration/env/backend.env` at container start.
-
----
-
-## Jenkins jobs (what each one is for)
-
-| Job | Who starts it | What it does |
-|-----|---------------|--------------|
-| `collaboration-backend` | You, or FE/BE router | Pull (optional) → build/push image → recreate `backend` → health |
-| `collaboration-frontend` | You, or router | Same for Next → `:3000` |
-| `collaboration-notification` | You, or router | Same for NES → `:8006` |
-| `github-push-collaboration` | GitHub push webhook | **Router only** — decides which app job to start |
-| `sync-devops-control-plane` | DevOps repo webhook / manual | `git pull` control plane + `sync-jobs.sh` (**does not** rebuild apps) |
-| `apply-vault-env` | You / Secrets Room | Vault → `env/*.env` → recreate (or rebuild FE if public env changed) |
-
-### `ACTION` parameter (app jobs)
-
-| ACTION | `git pull`? | Build image? | Deploy? | Typical use |
-|--------|-------------|--------------|---------|-------------|
-| `start` | no | no | yes | Start stopped container |
-| `stop` | no | no | stop | Stop one service |
-| `restart` / `recreate` | no | no | recreate | Fast redeploy **existing** image tag |
-| `build-and-start` | no | yes (local tree) | yes | First build / force from current tree |
-| `update-from-github` | yes | yes | yes | What the **webhook** uses after push |
-
-**Why Jenkins helps**
-
-- One UI for build + deploy + logs (same stage story as production)
-- Webhooks remove “SSH in and remember compose commands”
-- Shared `docker-lib.sh` keeps FE/BE/NES behavior aligned
-- Image skip-by-SHA keeps rebuilds short when commit did not change
-- Control-plane sync updates pipelines without touching app repos
-
----
-
-## Webhooks (how push becomes a deploy)
-
-### Two tokens, two jobs
-
-| Token file | Job | Purpose |
-|------------|-----|---------|
-| `jenkins/secrets/github-webhook-collab-token.txt` | `github-push-collaboration` | App repos (FE / BE / NES) |
-| `jenkins/secrets/github-webhook-token.txt` | `sync-devops-control-plane` | This DevOps repo |
-
-Default lab collab token (unless rotated): `selamnew-collab-push`.
-
-**GitHub webhook URL (app repos):**
-
-```text
-https://selamnewcollab.tail020266.ts.net/generic-webhook-trigger/invoke?token=<collab-token>
-```
-
-(or `http://172.16.50.39:8080/generic-webhook-trigger/invoke?token=<collab-token>` on LAN)
-
-- Content type: **application/json**
-- Event: **push**
-- Do **not** use `/github-webhook/` for this lab router
-
-### App push flow (`develop` only)
-
-```mermaid
-flowchart LR
-  A[git push origin develop] --> B[GitHub delivery]
-  B --> C[Funnel / Nginx]
-  C --> D[Generic Webhook Trigger]
-  D -->|token matches| E[github-push-collaboration]
-  E --> F{repo + branch?}
-  F -->|fe + develop| G[collaboration-frontend<br/>ACTION=update-from-github]
-  F -->|be + develop| H[collaboration-backend<br/>ACTION=update-from-github]
-  F -->|nes + develop| I[collaboration-notification]
-  F -->|other branch/repo| J[No deploy]
-```
-
-Router behavior (important):
-
-- Matches `repository.full_name` / `name` (case-insensitive)
-- FE repo name: `selamnew-collaboration-fe`
-- BE repo name: `selamnew-collaboration-backend`
-- Only **`refs/heads/develop`**
-- Starts downstream with **`wait: false`** so a long BE build does **not** block an FE webhook
-- GWT config is written by `sync-jobs.sh` as `PipelineTriggersJobProperty` + injected `triggers { GenericTrigger(...) }` (GWT 2.4+; old `JobPropertyImpl` no longer exists)
-
-### DevOps control-plane push
-
-```text
-push docker-devops → sync-devops-control-plane → git pull /var/devops → sync-jobs.sh
-```
-
-That **updates Jenkins job definitions**. It does **not** rebuild FE/BE images.
-
-### After changing a Jenkinsfile on the server
-
-```bash
-cd /home/ienetworks/workspace/tools/docker-devops
-# if edited on laptop: rsync / install-from-laptop, or git pull
-export JENKINS_ADMIN_USER=admin JENKINS_ADMIN_PASS='…'   # from secrets/admin.env
-bash jenkins/bin/sync-jobs.sh
-```
-
----
-
-## Secrets & Vault
-
-```mermaid
-flowchart LR
-  V[Vault KV] --> SR[Secrets Room :8300]
-  V --> APPLY[apply-vault-env]
-  SR --> APPLY
-  APPLY --> BE_ENV[collaboration/env/backend.env]
-  APPLY --> FE_ENV[collaboration/env/frontend.env]
-  APPLY --> NES_ENV[notification/env/…]
-  BE_ENV --> BE[backend container]
-  FE_ENV --> BUILD[FE docker build args + runtime]
-  BUILD --> FE[frontend container]
-```
-
-- Runtime secrets: Vault → `apply-vault-env` → env files → recreate containers  
-- **Never commit** `collaboration/env/*.env` or `jenkins/secrets/*`  
-- FE public config must be present at **image build** time
-
----
-
-## Encryption (frontend ↔ backend)
-
-Browser **Web Crypto** (`crypto.subtle.importKey`) only works in a **secure context** (HTTPS or `localhost`).  
-Opening the lab as `http://172.16.50.39:3000` means encryption **must be off** on the FE, or you get:
-
-`Cannot read properties of undefined (reading 'importKey')`
-
-| Environment | Backend encrypts? | Frontend setting |
-|-------------|-------------------|------------------|
-| Local `npm run dev` | No (`NODE_ENV=development`) | `NEXT_PUBLIC_ENCRYPTION_DISABLED=true` |
-| Lab over **HTTP** IP (`172.16.50.39`) | Lab BE uses `NODE_ENV=development` → plain | **`NEXT_PUBLIC_ENCRYPTION_DISABLED=true`** (required) |
-| HTTPS / production | Yes | `NEXT_PUBLIC_ENCRYPTION_DISABLED=false` + matching KEY/SALT/IV |
-
-**Lab gotcha:** `npm run start:prod` forces `NODE_ENV=production` even if `backend.env` says `development`. Compose must run `node dist/main` so the env file wins. Otherwise BE encrypts, FE does not → `f.reduce is not a function` / “not iterable”.
-
-Mismatch symptoms:
-
-- FE encrypt on, BE plain → `importKey` crash on HTTP, or weird payloads  
-- FE encrypt off, BE encrypt on → `(x ?? []) is not iterable` / `.reduce is not a function` (ciphertext `{ data }` treated as a list)
-
-Rebuild FE after flipping the flag:
-
-```bash
-FORCE_REBUILD=1 ./scripts/build-images-on-host.sh frontend
-# Jenkins → collaboration-frontend → ACTION=recreate
-```
-
----
-
-## Daily workflows (cheat sheet)
+## Daily workflows
 
 **Deploy my backend commit on `develop`**
 
@@ -368,9 +406,7 @@ FORCE_REBUILD=1 ./scripts/build-images-on-host.sh frontend
 
 **Deploy frontend the same way** → `collaboration-frontend`.
 
-**Only restart containers (image already good)**
-
-- `ACTION=recreate` (fast)
+**Only restart containers (image already good)** → `ACTION=recreate`.
 
 **Change Compose / Dockerfile / Jenkinsfile in this repo**
 
@@ -378,28 +414,18 @@ FORCE_REBUILD=1 ./scripts/build-images-on-host.sh frontend
 2. `bash jenkins/bin/sync-jobs.sh` (or DevOps webhook)
 3. Rebuild/recreate the affected service
 
-**Change Vault secrets**
+**Change Vault secrets** → Secrets Room / Vault → `apply-vault-env` (`TARGET=all|backend|frontend|notification`).
 
-1. Edit in Vault / Secrets Room  
-2. Run `apply-vault-env` (`TARGET=all|backend|frontend|notification`)
-
-**Copy local DB into lab Adminer**
-
-```bash
-# example: pg_dump local → scp → pg_restore into collaboration-db-1
-# Adminer: http://172.16.50.39:8083  server=db  db=selamnew-collab
-```
-
-After restoring `device_sessions` from another machine, truncate lab `device_sessions` or clients get “device signed out”.
+**Copy local DB into lab** → `pg_dump` → restore into `collaboration-db-1` (Adminer `:8083`). After restore, `TRUNCATE device_sessions;` or clients get “device signed out”.
 
 ---
 
 ## Fast path when builds feel slow
 
 1. `bash scripts/warm-lab-base.sh` once  
-2. Prefer `scripts/build-images-on-host.sh <service>` over Jenkins for heavy `npm`/`next build`  
+2. Prefer `scripts/build-images-on-host.sh <service>` for heavy `npm` / `next build`  
 3. Jenkins `ACTION=recreate` only  
-4. Same git SHA already in registry → build stage **skips** automatically  
+4. Same git SHA already in registry → build stage **skips**  
 5. Env/Dockerfile-only FE changes: `FORCE_REBUILD=1` on host build
 
 ---
@@ -430,9 +456,16 @@ jenkins/
   secrets/               admin.env + webhook tokens (gitignored)
 ```
 
-Pipelines source `/var/devops/jenkins/lib/docker-lib.sh` inside the Jenkins container (`docker-devops` is mounted at `/var/devops`).
+| File under `jenkins/jobs/` | Jenkins job |
+|----------------------------|-------------|
+| `Jenkinsfile.collaboration-backend` | `collaboration-backend` |
+| `Jenkinsfile.collaboration-frontend` | `collaboration-frontend` |
+| `Jenkinsfile.collaboration-notification` | `collaboration-notification` |
+| `Jenkinsfile.github-push-collaboration` | `github-push-collaboration` |
+| `Jenkinsfile.sync-devops-control-plane` | `sync-devops-control-plane` |
+| `Jenkinsfile.apply-vault-env` | `apply-vault-env` |
 
-After editing any file under `jenkins/jobs/`, run `bash jenkins/bin/sync-jobs.sh` (or push this control-plane repo so `sync-devops-control-plane` does it). Do not hand-edit job config in the Jenkins UI if you want Git to stay source of truth.
+Do not hand-edit job config in the Jenkins UI if you want Git to stay source of truth.
 
 ---
 
@@ -450,11 +483,11 @@ After editing any file under `jenkins/jobs/`, run `bash jenkins/bin/sync-jobs.sh
 
 | Symptom | Check |
 |---------|--------|
-| Webhook GitHub **404** / “no GenericTrigger” | Run `jenkins/bin/sync-jobs.sh`; confirm GWT plugin; URL must be `/generic-webhook-trigger/invoke?token=…` |
-| FE webhook **200** but no FE job | Old bug: router `wait:true` + `disableConcurrentBuilds` blocked behind BE — fixed; router should finish in seconds |
-| Only `develop` should deploy | Other branches are ignored by design |
+| Webhook GitHub **404** / “no GenericTrigger” | Run `jenkins/bin/sync-jobs.sh`; URL must be `/generic-webhook-trigger/invoke?token=…` |
+| FE webhook **200** but no FE job | Router must use `wait: false` so BE does not block FE |
+| Only `develop` should deploy | Other branches ignored by design |
 | `image not found` on deploy | Build once into registry (`build-and-start` or host script) |
-| FE login `.map` / “not iterable” | Encryption mismatch or missing bake-time `NEXT_PUBLIC_*` — rebuild FE with encryption **enabled** for lab |
+| FE `.reduce` / “not iterable” / login crashes | Encryption mismatch — BE must be plain (`node dist/main` + `NODE_ENV=development`); FE `ENCRYPTION_DISABLED=true` |
 | Device signed out after DB copy | `TRUNCATE device_sessions;` on lab DB |
 | Registry push connection refused | `docker compose -f registry/docker-compose.yml up -d` |
 | Jenkins job XML stale | `sync-jobs.sh` after editing `jenkins/jobs/*` |
@@ -471,20 +504,5 @@ curl -sS -X POST -H 'Content-Type: application/json' \
 Expect `"triggered": true` and a new `collaboration-frontend` build.
 
 ---
-
-## Jenkinsfile → job map
-
-`jenkins/bin/sync-jobs.sh` reads these files and POSTs them into Jenkins:
-
-| File under `jenkins/jobs/` | Jenkins job |
-|----------------------------|-------------|
-| `Jenkinsfile.collaboration-backend` | `collaboration-backend` |
-| `Jenkinsfile.collaboration-frontend` | `collaboration-frontend` |
-| `Jenkinsfile.collaboration-notification` | `collaboration-notification` |
-| `Jenkinsfile.github-push-collaboration` | `github-push-collaboration` |
-| `Jenkinsfile.sync-devops-control-plane` | `sync-devops-control-plane` |
-| `Jenkinsfile.apply-vault-env` | `apply-vault-env` |
-
-App jobs start with a **Why this job ran** stage (manual vs webhook).
 
 This **README.md** is the single full guide for the lab — start here.
