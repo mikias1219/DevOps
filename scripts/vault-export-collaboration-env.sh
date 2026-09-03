@@ -7,7 +7,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SECRETS_DIR="$ROOT/vault/secrets"
 OUT_DIR="$ROOT/collaboration/env"
-TARGET="${TARGET:-both}"
+# Prefer CLI arg (vault-export-all-env.sh passes both|backend|frontend).
+# Env TARGET may be "all" from apply-vault-env — map that to both here.
+TARGET="${1:-${TARGET:-both}}"
+case "$TARGET" in
+  all) TARGET=both ;;
+esac
 DEVOPS_HOST_PATH="${DEVOPS_HOST_PATH:-/home/ienetworks/workspace/tools/docker-devops}"
 
 mkdir -p "$OUT_DIR"
@@ -102,17 +107,26 @@ import json, os, sys
 out = os.environ["OUT_FILE"]
 data = json.load(sys.stdin)
 payload = data.get("data", {}).get("data") or data.get("data") or {}
-lines = []
+merged = {}
+if os.path.isfile(out):
+    with open(out, encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            merged[k] = v
 for k in sorted(payload.keys()):
     if k == "_seed":
         continue
     v = payload[k]
     if v is None:
         v = ""
-    lines.append(f"{k}={v}")
+    merged[k] = v
+lines = [f"{k}={merged[k]}" for k in sorted(merged.keys())]
 with open(out, "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + ("\n" if lines else ""))
-print(f"  wrote {len(lines)} keys")
+print(f"  wrote {len(payload)} Vault keys (file now has {len(merged)} total)")
 '
 
   if command -v python3 >/dev/null 2>&1; then

@@ -1,14 +1,13 @@
-# Lab frontend — uses cached node:20-bookworm-slim
-FROM node:20-bookworm-slim AS deps
+# Lab frontend — FROM prebuilt lab-node (no apt). Fast after warm-lab-base.sh.
+ARG LAB_NODE=127.0.0.1:5001/lab-node:20
+FROM ${LAB_NODE} AS deps
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* .npmrc* ./
 RUN npm config set fetch-timeout 600000 fetch-retries 5 \
   && npm ci --no-audit --no-fund --legacy-peer-deps 2>/dev/null \
     || npm install --no-audit --no-fund --legacy-peer-deps
 
-FROM node:20-bookworm-slim AS builder
+FROM ${LAB_NODE} AS builder
 WORKDIR /app
 ARG NEXT_PUBLIC_COLLABORATION_URL=http://172.16.50.39:5000/api/v1
 ARG NEXT_PUBLIC_WS_URL=http://172.16.50.39:5000
@@ -41,7 +40,7 @@ COPY . .
 RUN mkdir -p public
 RUN NODE_OPTIONS=--max-old-space-size=4096 npx next build
 
-FROM node:20-bookworm-slim AS runner
+FROM ${LAB_NODE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

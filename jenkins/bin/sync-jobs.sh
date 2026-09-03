@@ -13,14 +13,16 @@ OUT_DIR="${TMPDIR:-/tmp}/jenkins-sync"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:8080}"
 mkdir -p "$OUT_DIR"
 
+_CLI_USER="${JENKINS_ADMIN_USER:-}"
+_CLI_PASS="${JENKINS_ADMIN_PASS:-}"
 if [[ -f "$SECRETS_DIR/admin.env" ]]; then
   set -a
   # shellcheck disable=SC1091
   . "$SECRETS_DIR/admin.env"
   set +a
 fi
-JENKINS_ADMIN_USER="${JENKINS_ADMIN_USER:-admin}"
-JENKINS_ADMIN_PASS="${JENKINS_ADMIN_PASS:-}"
+JENKINS_ADMIN_USER="${_CLI_USER:-${JENKINS_ADMIN_USER:-admin}}"
+JENKINS_ADMIN_PASS="${_CLI_PASS:-${JENKINS_ADMIN_PASS:-}}"
 
 if [[ -z "$JENKINS_ADMIN_PASS" ]]; then
   echo "WARN: JENKINS_ADMIN_PASS unset. Copy jenkins/secrets/admin.env.example → admin.env" >&2
@@ -47,19 +49,22 @@ else
 fi
 
 COOKIE_JAR="$(mktemp)"
-CRUMB_JSON="$(curl -sf "${CURL_AUTH[@]}" -c "$COOKIE_JAR" "$JENKINS_URL/crumbIssuer/api/json" || echo '{}')"
-CRUMB_FIELD="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("crumbRequestField",""))' <<<"$CRUMB_JSON")"
-CRUMB_VALUE="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("crumb",""))' <<<"$CRUMB_JSON")"
-
-curl_crumb=()
-if [[ -n "$CRUMB_FIELD" && -n "$CRUMB_VALUE" ]]; then
-  curl_crumb+=(-H "${CRUMB_FIELD}: ${CRUMB_VALUE}")
-fi
+refresh_crumb() {
+  CRUMB_JSON="$(curl -sf "${CURL_AUTH[@]}" -c "$COOKIE_JAR" "$JENKINS_URL/crumbIssuer/api/json" || echo '{}')"
+  CRUMB_FIELD="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("crumbRequestField",""))' <<<"$CRUMB_JSON")"
+  CRUMB_VALUE="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("crumb",""))' <<<"$CRUMB_JSON")"
+  curl_crumb=()
+  if [[ -n "$CRUMB_FIELD" && -n "$CRUMB_VALUE" ]]; then
+    curl_crumb+=(-H "${CRUMB_FIELD}: ${CRUMB_VALUE}")
+  fi
+}
+refresh_crumb
 
 post_job_xml() {
   local job_name="$1"
   local out_xml="$2"
   local exists http_code
+  refresh_crumb
   exists="$(
     curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -b "$COOKIE_JAR" \
       "$JENKINS_URL/job/${job_name}/api/json"
@@ -99,6 +104,7 @@ post_job_xml() {
 delete_job() {
   local job_name="$1"
   local exists
+  refresh_crumb
   exists="$(
     curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -b "$COOKIE_JAR" \
       "$JENKINS_URL/job/${job_name}/api/json"

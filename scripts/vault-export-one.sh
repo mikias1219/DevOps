@@ -34,9 +34,23 @@ import json, os, sys
 out = os.environ["OUT_FILE"]
 data = json.load(sys.stdin)
 payload = (data.get("data") or {}).get("data") or {}
-lines = [f"{k}={payload[k]}" for k in sorted(payload.keys()) if k != "_seed"]
+# Merge: keep existing keys not present in Vault (e.g. lab Firebase extras).
+merged = {}
+if os.path.isfile(out):
+    with open(out) as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            merged[k] = v
+for k in sorted(payload.keys()):
+    if k == "_seed":
+        continue
+    merged[k] = payload[k]
+lines = [f"{k}={merged[k]}" for k in sorted(merged.keys())]
 with open(out, "w") as f:
     f.write("\n".join(lines) + ("\n" if lines else ""))
-print(f"  wrote {len(lines)} keys")
+print(f"  wrote {len(payload)} Vault keys (file now has {len(merged)} total)")
 ' <<<"$json"
 chmod 600 "$OUT_FILE" 2>/dev/null || true

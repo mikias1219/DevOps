@@ -13,14 +13,15 @@ export_path() {
 
 case "$TARGET" in
   all|both)
-    bash "$ROOT/scripts/vault-export-collaboration-env.sh" both
+    # Unset TARGET so child script does not inherit TARGET=all from apply-vault-env
+    TARGET=both bash "$ROOT/scripts/vault-export-collaboration-env.sh" both
     export_path "collaboration/notification" "$ROOT/notification/env/notification.env"
     ;;
   backend)
-    bash "$ROOT/scripts/vault-export-collaboration-env.sh" backend
+    TARGET=backend bash "$ROOT/scripts/vault-export-collaboration-env.sh" backend
     ;;
   frontend)
-    bash "$ROOT/scripts/vault-export-collaboration-env.sh" frontend
+    TARGET=frontend bash "$ROOT/scripts/vault-export-collaboration-env.sh" frontend
     ;;
   notification)
     export_path "collaboration/notification" "$ROOT/notification/env/notification.env"

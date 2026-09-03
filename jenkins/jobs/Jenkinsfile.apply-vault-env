@@ -4,7 +4,7 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
-    timeout(time: 45, unit: 'MINUTES')
+    timeout(time: 60, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '30'))
   }
 
@@ -51,13 +51,13 @@ pipeline {
       }
     }
 
-    stage('Rebuild frontend (NEXT_PUBLIC is bake-time)') {
+    stage('Recreate frontend (runtime env; rebuild only if NEXT_PUBLIC changed)') {
       when { expression { return params.TARGET in ['frontend', 'both', 'all'] } }
       steps {
         build job: 'collaboration-frontend',
           wait: true,
           propagate: true,
-          parameters: [string(name: 'ACTION', value: 'build-and-start')]
+          parameters: [string(name: 'ACTION', value: 'recreate')]
       }
     }
 

@@ -282,6 +282,29 @@ _registry_has_tag() {
   docker pull "${_image}:${_tag}" >/dev/null 2>&1
 }
 
+lab_node_image() {
+  printf '%s/lab-node:20' "$(registry_host)"
+}
+
+# One-time base with g++/python — app Dockerfiles never run apt-get.
+ensure_lab_node_base() {
+  _img="$(lab_node_image)"
+  if docker image inspect "$_img" >/dev/null 2>&1; then
+    echo "==> lab-node base ready (${_img})"
+    return 0
+  fi
+  if docker pull "$_img" >/dev/null 2>&1; then
+    echo "==> pulled lab-node base (${_img})"
+    return 0
+  fi
+  echo "==> Building lab-node base ONCE (apt tools — slow first time only)"
+  DOCKER_BUILDKIT=0 docker build \
+    -f "${DEVOPS_ROOT}/collaboration/docker/lab-node.Dockerfile" \
+    -t "$_img" \
+    "${DEVOPS_ROOT}/collaboration/docker"
+  docker push "$_img" 2>/dev/null || true
+}
+
 _frontend_public_arg() {
   _key="$1"
   _default="$2"
@@ -296,15 +319,16 @@ build_and_push_collaboration_backend() {
   _image="${_reg}/collaboration-backend"
   ensure_local_registry
   if _registry_has_tag "$_image" "$_sha"; then
-    echo "==> skip build: ${_image}:${_sha} already in registry"
+    echo "==> skip build: ${_image}:${_sha} already in registry (FAST PATH)"
     env_file_set "$ENV_FILE" BACKEND_IMAGE_TAG "$_sha"
     echo "BACKEND_IMAGE_TAG=${_sha}"
     return 0
   fi
-  echo "==> docker build ${_image}:${_sha}"
-  # Classic builder: this host may not have the buildx plugin.
+  ensure_lab_node_base
+  echo "==> docker build ${_image}:${_sha} (no apt — uses lab-node base)"
   DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/backend.Dockerfile" \
+    --build-arg "LAB_NODE=$(lab_node_image)" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
     -t "${_image}:latest" \
@@ -342,14 +366,16 @@ build_and_push_collaboration_frontend() {
   fi
   ensure_local_registry
   if _registry_has_tag "$_image" "$_sha"; then
-    echo "==> skip build: ${_image}:${_sha} already in registry"
+    echo "==> skip build: ${_image}:${_sha} already in registry (FAST PATH)"
     env_file_set "$ENV_FILE" FRONTEND_IMAGE_TAG "$_sha"
     echo "FRONTEND_IMAGE_TAG=${_sha}"
     return 0
   fi
-  echo "==> docker build ${_image}:${_sha}"
+  ensure_lab_node_base
+  echo "==> docker build ${_image}:${_sha} (no apt — uses lab-node base)"
   DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile" \
+    --build-arg "LAB_NODE=$(lab_node_image)" \
     --build-arg "NEXT_PUBLIC_COLLABORATION_URL=${_api_v1}" \
     --build-arg "NEXT_PUBLIC_WS_URL=${_ws}" \
     --build-arg "NEXT_PUBLIC_API_URL=${_api}" \
@@ -581,14 +607,16 @@ build_and_push_collaboration_notification() {
   _image="${_reg}/collaboration-notification"
   ensure_local_registry
   if _registry_has_tag "$_image" "$_sha"; then
-    echo "==> skip build: ${_image}:${_sha} already in registry"
+    echo "==> skip build: ${_image}:${_sha} already in registry (FAST PATH)"
     env_file_set "$NOTIFICATION_ENV_FILE" NOTIFICATION_IMAGE_TAG "$_sha"
     echo "NOTIFICATION_IMAGE_TAG=${_sha}"
     return 0
   fi
-  echo "==> docker build ${_image}:${_sha}"
+  ensure_lab_node_base
+  echo "==> docker build ${_image}:${_sha} (no apt — uses lab-node base)"
   DOCKER_BUILDKIT=0 docker build \
     -f "${DEVOPS_ROOT}/notification/docker/notification.Dockerfile" \
+    --build-arg "LAB_NODE=$(lab_node_image)" \
     -t "${_image}:${_sha}" \
     -t "${_image}:${_branch}" \
     -t "${_image}:latest" \

@@ -35,6 +35,16 @@ services:
       - ./env/notification.env
     environment:
       APP_PORT: "8006"
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: ${NOTIFICATION_DB_USER:-postgres}
+      DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-nes_secret}
+      DB_NAME: ${NOTIFICATION_DB_NAME:-selamnew-notification}
+      DB_TYPE: postgres
+      DB_SYNCHRONIZE_ENTITIES: "true"
+      FILE_SERVER_URL: ${FILE_SERVER_URL:-http://172.16.50.39:5000}
+      PRODUCT: ${PRODUCT:-COLLAB}
+      SOURCE_SERVICE: ${SOURCE_SERVICE:-collaboration}
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       POSTGRES_USER: ${NOTIFICATION_DB_USER:-postgres}
