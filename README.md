@@ -332,14 +332,23 @@ flowchart LR
 
 ## Encryption (frontend ↔ backend)
 
-| Environment | Backend encrypts responses? | Frontend must decrypt? |
-|-------------|----------------------------|-------------------------|
-| Local `npm run dev` (`NODE_ENV=development`) | No | Usually `NEXT_PUBLIC_ENCRYPTION_DISABLED=true` |
-| Lab / production images | **Yes** | **`NEXT_PUBLIC_ENCRYPTION_DISABLED=false`** + matching KEY/SALT/IV baked into the FE image |
+Browser **Web Crypto** (`crypto.subtle.importKey`) only works in a **secure context** (HTTPS or `localhost`).  
+Opening the lab as `http://172.16.50.39:3000` means encryption **must be off** on the FE, or you get:
 
-Mismatch symptom: UI crashes like `(x ?? []) is not iterable` because the client treats `{ data: "<ciphertext>" }` as JSON arrays.
+`Cannot read properties of undefined (reading 'importKey')`
 
-Rebuild FE after flipping encryption flags:
+| Environment | Backend encrypts? | Frontend setting |
+|-------------|-------------------|------------------|
+| Local `npm run dev` | No (`NODE_ENV=development`) | `NEXT_PUBLIC_ENCRYPTION_DISABLED=true` |
+| Lab over **HTTP** IP (`172.16.50.39`) | Lab BE uses `NODE_ENV=development` → plain | **`NEXT_PUBLIC_ENCRYPTION_DISABLED=true`** (required) |
+| HTTPS / production | Yes | `NEXT_PUBLIC_ENCRYPTION_DISABLED=false` + matching KEY/SALT/IV |
+
+Mismatch symptoms:
+
+- FE encrypt on, BE plain → `importKey` crash on HTTP, or weird payloads  
+- FE encrypt off, BE encrypt on → `(x ?? []) is not iterable` (ciphertext object treated as data)
+
+Rebuild FE after flipping the flag:
 
 ```bash
 FORCE_REBUILD=1 ./scripts/build-images-on-host.sh frontend
