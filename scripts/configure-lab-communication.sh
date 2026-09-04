@@ -31,6 +31,7 @@ if [[ -f "$BE_ENV" ]]; then
   set_kv "$BE_ENV" "COLLABORATION_FRONT_URL" "http://${SERVER_IP}:3000"
   set_kv "$BE_ENV" "NOTIFICATION_SERVICE_URL" "http://${SERVER_IP}:8006/api/v1"
   set_kv "$BE_ENV" "NOTIFICATION_SERVICE_AUTH_TOKEN" "Bearer lab-notification-token"
+  set_kv "$BE_ENV" "PRODUCT" "COLLAB"
   chmod 600 "$BE_ENV"
 fi
 
@@ -41,6 +42,7 @@ if [[ -f "$FE_ENV" ]]; then
   set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_URL" "http://${SERVER_IP}:5000/api/v1"
   set_kv "$FE_ENV" "NEXT_PUBLIC_WS_URL" "http://${SERVER_IP}:5000"
   set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_SOCKET_URL" "http://${SERVER_IP}:5000"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_NOTIFICATION_URL" "http://${SERVER_IP}:8006/api/v1"
   chmod 600 "$FE_ENV"
 fi
 
