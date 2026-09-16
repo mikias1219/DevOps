@@ -236,13 +236,14 @@ $DOCKER compose -f "$ROOT/notification/docker-compose.yml" \
   up -d db adminer 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# 6. Nginx webhook proxy
+# 6. Nginx front door (:80 → FE / BE / NES / Jenkins webhooks)
 # ---------------------------------------------------------------------------
-log "Installing Nginx webhook proxy"
-sudo cp "$ROOT/nginx/selamnew-vault-secrets.conf" /etc/nginx/sites-available/selamnew-devops-webhooks 2>/dev/null || true
-if [[ -f /etc/nginx/sites-available/selamnew-devops-webhooks ]]; then
-  sudo ln -sf /etc/nginx/sites-available/selamnew-devops-webhooks /etc/nginx/sites-enabled/selamnew-devops-webhooks
-  sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+log "Installing Nginx lab front door"
+if [[ -f "$ROOT/nginx/selamnew-collab.conf" ]]; then
+  sudo cp "$ROOT/nginx/selamnew-collab.conf" /etc/nginx/sites-available/selamnew-collab
+  sudo ln -sfn /etc/nginx/sites-available/selamnew-collab /etc/nginx/sites-enabled/selamnew-collab
+  sudo rm -f /etc/nginx/sites-enabled/default \
+    /etc/nginx/sites-enabled/selamnew-devops-webhooks 2>/dev/null || true
   sudo nginx -t && sudo systemctl reload nginx
 fi
 
@@ -271,20 +272,21 @@ echo " Server:     ${SERVER_IP}"
 echo " DevOps:     ${DEVOPS_ROOT}"
 echo " App source: ${COLLAB_SOURCE} (read-only for builds)"
 echo
-echo " URLs:"
+echo " URLs (nginx :80):"
+echo "  Frontend:       http://${SERVER_IP}/"
+echo "  Backend health: http://${SERVER_IP}/api/v1/health"
+echo "  Notification:   http://${SERVER_IP}/notification/api/v1/health"
+echo "  Webhook (GWT):  http://${SERVER_IP}/generic-webhook-trigger/invoke?token=…"
+echo " Management:"
 echo "  Jenkins:        http://${SERVER_IP}:8080"
 echo "  Vault UI:       http://${SERVER_IP}:8200/ui"
-echo "  Secrets Room:   http://${SERVER_IP}:8300"
 echo "  Portainer:      https://${SERVER_IP}:9443"
-echo "  Collab FE:      http://${SERVER_IP}:3000"
-echo "  Collab BE:      http://${SERVER_IP}:5000/api/v1/health"
-echo "  Notification:   http://${SERVER_IP}:8006"
-echo "  Adminer (collab): http://${SERVER_IP}:8083"
 echo "  Registry:       127.0.0.1:5001 (local only)"
 echo
 echo " Jenkins jobs (Build with Parameters → ACTION):"
+echo "  github-push-collaboration (webhook router)"
 echo "  collaboration-backend | collaboration-frontend | collaboration-notification"
-echo "  collaboration-stack   | apply-vault-env | sync-devops-control-plane"
+echo "  apply-vault-env | sync-devops-control-plane"
 echo
 echo " Learning guide: ${DEVOPS_ROOT}/LEARNING-GUIDE.md"
 echo "=============================================="

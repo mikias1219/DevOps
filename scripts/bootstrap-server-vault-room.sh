@@ -34,26 +34,31 @@ if [[ -f "$ROOT/collaboration/env/backend.env" ]]; then
   "$ROOT/scripts/vault-import-from-env.sh" || true
 fi
 
-echo "==> Secrets Room"
-if [[ ! -f "$ROOT/secrets-room/.env" ]]; then
-  cp "$ROOT/secrets-room/.env.example" "$ROOT/secrets-room/.env"
-  # shellcheck disable=SC1091
-  . "$ROOT/vault/secrets/vault-keys.env"
-  # shellcheck disable=SC1091
-  . "$ROOT/jenkins/secrets/admin.env"
-  {
-    echo "VAULT_ADDR=${VAULT_ADDR:-http://127.0.0.1:8200}"
-    echo "VAULT_TOKEN=${VAULT_ROOT_TOKEN}"
-    echo "ROOM_BASIC_USER=operator"
-    echo "ROOM_BASIC_PASS=$(openssl rand -hex 8)"
-    echo "JENKINS_URL=http://127.0.0.1:8080"
-    echo "JENKINS_ADMIN_USER=${JENKINS_ADMIN_USER:-admin}"
-    echo "JENKINS_ADMIN_PASS=${JENKINS_ADMIN_PASS}"
-    echo "COLLABORATION_SOURCE=${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}"
-  } >"$ROOT/secrets-room/.env"
-  chmod 600 "$ROOT/secrets-room/.env"
+echo "==> Secrets Room (optional — Vault UI is enough for this lab)"
+if [[ "${START_SECRETS_ROOM:-0}" == "1" ]]; then
+  if [[ ! -f "$ROOT/secrets-room/.env" ]]; then
+    cp "$ROOT/secrets-room/.env.example" "$ROOT/secrets-room/.env"
+    # shellcheck disable=SC1091
+    . "$ROOT/vault/secrets/vault-keys.env"
+    # shellcheck disable=SC1091
+    . "$ROOT/jenkins/secrets/admin.env"
+    {
+      echo "VAULT_ADDR=${VAULT_ADDR:-http://127.0.0.1:8200}"
+      echo "VAULT_TOKEN=${VAULT_ROOT_TOKEN}"
+      echo "ROOM_BASIC_USER=operator"
+      echo "ROOM_BASIC_PASS=$(openssl rand -hex 8)"
+      echo "JENKINS_URL=http://127.0.0.1:8080"
+      echo "JENKINS_ADMIN_USER=${JENKINS_ADMIN_USER:-admin}"
+      echo "JENKINS_ADMIN_PASS=${JENKINS_ADMIN_PASS}"
+      echo "COLLABORATION_SOURCE=${COLLABORATION_SOURCE:-/home/ienetworks/workspace/company/SelamnewCollaboration}"
+    } >"$ROOT/secrets-room/.env"
+    chmod 600 "$ROOT/secrets-room/.env"
+  fi
+  docker compose -f "$ROOT/secrets-room/docker-compose.yml" up -d --build
+else
+  echo "    skipped (set START_SECRETS_ROOM=1 to enable). Edit secrets in Vault UI; apply via Jenkins apply-vault-env."
+  docker compose -f "$ROOT/secrets-room/docker-compose.yml" stop 2>/dev/null || true
 fi
-docker compose -f "$ROOT/secrets-room/docker-compose.yml" up -d --build
 
 echo "==> Sync Jenkins jobs"
 export JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:8080}"
@@ -62,7 +67,7 @@ export JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:8080}"
 echo
 echo "Done."
 echo "  Vault UI:       http://SERVER_IP:8200/ui"
-echo "  Secrets Room:   http://SERVER_IP:8300/"
 echo "  Jenkins sync:   job sync-devops-control-plane"
+echo "  apply secrets:  Jenkins → apply-vault-env"
 echo "  Webhook tokens: jenkins/secrets/github-webhook-*.txt"
 echo "  Operator login: vault/secrets/operator-login.txt"

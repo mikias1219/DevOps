@@ -20,19 +20,20 @@ Jenkins never runs Nest/Next itself. It drives **host Docker** through `/var/run
 
 | Service | URL | Notes |
 |---------|-----|--------|
-| Frontend | http://172.16.50.39:3000 | Next.js |
-| Backend API | http://172.16.50.39:5000/api/v1/health | Nest |
-| Notification | http://172.16.50.39:8006/api/v1/health | NES (separate compose) |
-| Jenkins | http://172.16.50.39:8080 | `admin` / see `jenkins/secrets/admin.env` |
-| Adminer (collab DB) | http://172.16.50.39:8083 | Server `db`, DB `selamnew-collab`, user `postgres` |
-| Adminer (NES DB) | http://172.16.50.39:8084 | Separate Postgres |
-| Vault UI | http://172.16.50.39:8200/ui | |
-| Secrets Room | http://172.16.50.39:8300 | Compare / apply Vault → env |
-| Portainer | https://172.16.50.39:9443 | |
+| Frontend | http://172.16.50.39/ | Next.js via **nginx :80** |
+| Backend API | http://172.16.50.39/api/v1/health | Nest via nginx |
+| Notification | http://172.16.50.39/notification/api/v1/health | NES via nginx (`/notification/` → `:8006`) |
+| GitHub webhook | http://172.16.50.39/generic-webhook-trigger/invoke?token=… | Nginx → Jenkins GWT |
+| Jenkins | http://172.16.50.39:8080 | UI on dedicated port (`admin` / `jenkins/secrets/admin.env`) |
+| Vault UI | http://172.16.50.39:8200/ui | Edit KV secrets; apply with Jenkins `apply-vault-env` |
+| Portainer | https://172.16.50.39:9443 | Docker management |
 | Local registry | `127.0.0.1:5001` | On the server only |
-| Public webhooks | `https://selamnewcollab.tail020266.ts.net/generic-webhook-trigger/invoke?token=…` | Funnel → Nginx → Jenkins |
+| Adminer (collab / NES) | `:8083` / `:8084` | Lab DB UIs — **not** on nginx |
+| Direct app ports | `:3000` / `:5000` / `:8006` | Still bound; prefer nginx paths |
 
-Collaboration compose publishes: FE `3000`, BE `5000`, Postgres `5434`, Redis `6381`, Adminer `8083`, ES `9200`.
+Public Tailscale funnel (if enabled): `https://selamnewcollab.tail020266.ts.net/…` → same nginx paths.
+
+Collaboration compose still publishes: FE `3000`, BE `5000`, Postgres `5434`, Redis `6381`, Adminer `8083`, ES `9200`.
 
 ---
 
@@ -45,27 +46,28 @@ Two kinds of addressing:
 
 ```mermaid
 flowchart LR
-  Browser["Browser"] -->|"HTTP :3000"| FE["frontend"]
-  Browser -->|"HTTP + Socket.IO :5000"| BE["backend"]
-  FE -.->|"baked NEXT_PUBLIC_* host IP"| BE
+  Browser["Browser"] -->|"HTTP :80 /"| FE["frontend"]
+  Browser -->|"HTTP + Socket.IO :80 /api"| BE["backend"]
+  Browser -->|"HTTP :80 /notification"| NES["notification"]
+  FE -.->|"baked NEXT_PUBLIC_* nginx URLs"| BE
   BE -->|"DNS db:5432"| DB["Postgres"]
   BE -->|"DNS redis:6379"| Redis["Redis"]
   BE -->|"DNS elasticsearch:9200"| ES["Elasticsearch"]
-  BE -->|"host IP :8006"| NES["notification"]
-  NES -->|"host IP :5000"| BE
+  BE -->|"host nginx /notification"| NES
+  NES -->|"host nginx /api"| BE
 ```
 
 ### Who talks to whom
 
 | From | To | How | Typical URL / DNS |
 |------|----|-----|-------------------|
-| Browser | Frontend | HTTP | `http://172.16.50.39:3000` |
-| Browser | Backend | REST + Socket.IO | `http://172.16.50.39:5000` path `/api/v1` (socket path `/api/v1/socket.io`) |
-| Frontend container | Backend | Browser uses **baked** `NEXT_PUBLIC_*` host URLs (not Docker DNS) | `NEXT_PUBLIC_COLLABORATION_URL=http://172.16.50.39:5000/api/v1` |
+| Browser | Frontend | HTTP nginx | `http://172.16.50.39/` |
+| Browser | Backend | REST + Socket.IO nginx | `http://172.16.50.39/api/v1` (socket path `/api/v1/socket.io`) |
+| Frontend container | Backend | Browser uses **baked** `NEXT_PUBLIC_*` host URLs | `NEXT_PUBLIC_COLLABORATION_URL=http://172.16.50.39/api/v1` |
 | Backend | Postgres / Redis / ES | Compose DNS | `db:5432`, `redis:6379`, `http://elasticsearch:9200` |
-| Backend | Notification | Host IP + bearer token | `NOTIFICATION_SERVICE_URL=http://172.16.50.39:8006/api/v1` |
-| Notification | Backend | Host IP + bearer token | `COLLABORATION_SERVICE_URL=http://172.16.50.39:5000/api/v1` |
-| You | Adminer | HTTP | `:8083` → connects to Compose service `db` |
+| Backend | Notification | Host nginx + bearer | `NOTIFICATION_SERVICE_URL=http://172.16.50.39/notification/api/v1` |
+| Notification | Backend | Host nginx + bearer | `COLLABORATION_SERVICE_URL=http://172.16.50.39/api/v1` |
+| You | Adminer | HTTP (not nginx) | `:8083` → Compose service `db` |
 
 ### Ports (host → container)
 
@@ -88,15 +90,17 @@ Set in `collaboration/env/*.env` (and FE also **baked** at image build):
 
 | Variable | Where | Lab value pattern |
 |----------|--------|-------------------|
-| `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_COLLABORATION_URL` | frontend.env + FE build-args | `http://172.16.50.39:5000/api/v1` |
-| `NEXT_PUBLIC_WS_URL` / `NEXT_PUBLIC_COLLABORATION_SOCKET_URL` | frontend.env | `http://172.16.50.39:5000` |
+| `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_COLLABORATION_URL` | frontend.env + FE build-args | `http://172.16.50.39/api/v1` |
+| `NEXT_PUBLIC_WS_URL` / `NEXT_PUBLIC_COLLABORATION_SOCKET_URL` | frontend.env | `http://172.16.50.39` |
 | `NEXT_PUBLIC_COLLABORATION_SOCKET_PATH` | frontend.env | `/api/v1/socket.io` |
-| `NEXT_PUBLIC_APP_URL` | frontend.env | `http://172.16.50.39:3000` |
-| `COLLABORATION_FRONT_URL` | backend.env + compose | `http://172.16.50.39:3000` |
-| `APP_PUBLIC_BASE_URL` | backend.env + compose | `http://172.16.50.39:5000` |
+| `NEXT_PUBLIC_APP_URL` | frontend.env | `http://172.16.50.39` |
+| `NEXT_PUBLIC_NOTIFICATION_URL` | frontend.env | `http://172.16.50.39/notification/api/v1` |
+| `COLLABORATION_FRONT_URL` | backend.env + compose | `http://172.16.50.39` |
+| `APP_PUBLIC_BASE_URL` | backend.env + compose | `http://172.16.50.39` |
+| `NOTIFICATION_SERVICE_URL` | backend.env | `http://172.16.50.39/notification/api/v1` |
 | `DB_HOST` / `REDIS_HOST` / `ELASTICSEARCH_NODE` | compose overrides | `db` / `redis` / `http://elasticsearch:9200` |
 
-`scripts/configure-lab-communication.sh` patches these to `${SERVER_IP:-172.16.50.39}` before Vault import.
+`scripts/configure-lab-communication.sh` patches these to nginx path URLs on `${SERVER_IP:-172.16.50.39}` before Vault import.
 
 ---
 
@@ -269,27 +273,26 @@ bash jenkins/bin/sync-jobs.sh
 
 ---
 
-## Secrets & env management (Vault UI + Secrets Room)
+## Secrets & env management (Vault UI)
 
-Two UIs, one pipeline:
+**Vault UI** is enough for this lab. Edit KV in the browser, then run Jenkins **`apply-vault-env`**.
 
 | UI | URL | Purpose |
 |----|-----|---------|
 | **Vault UI** | http://172.16.50.39:8200/ui | Edit KV secrets (`secret/collaboration/*`) |
-| **Secrets Room** | http://172.16.50.39:8300/ | Compare Vault ↔ `env/*.env`, export, trigger **apply** |
+| Jenkins `apply-vault-env` | http://172.16.50.39:8080 | Export Vault → `env/*.env` → recreate apps |
 
 ```mermaid
 flowchart LR
-  Op[Operator] --> VUI[Vault UI :8200]
-  Op --> SR[Secrets Room :8300]
+  Op[Operator] --> VUI[Vault_UI_8200]
   VUI --> KV["KV secret/collaboration/*"]
-  SR --> KV
-  SR --> APPLY[Jenkins apply-vault-env]
+  Op --> APPLY[Jenkins_apply-vault-env]
+  APPLY --> KV
   APPLY --> BE_ENV[collaboration/env/backend.env]
   APPLY --> FE_ENV[collaboration/env/frontend.env]
   APPLY --> NES_ENV[notification/env]
-  BE_ENV --> BE[backend recreate]
-  FE_ENV --> FE[frontend recreate / rebuild if NEXT_PUBLIC]
+  BE_ENV --> BE[backend_recreate]
+  FE_ENV --> FE[frontend_recreate_or_rebuild]
 ```
 
 ### Logins (on the lab host)
@@ -297,9 +300,6 @@ flowchart LR
 ```bash
 # Vault UI (userpass)
 cat /home/ienetworks/workspace/tools/docker-devops/vault/secrets/operator-login.txt
-
-# Secrets Room (ROOM_BASIC_*)
-grep '^ROOM_BASIC_' /home/ienetworks/workspace/tools/docker-devops/secrets-room/.env
 ```
 
 Vault UI method: **Username** → user `operator` (policy `collaboration-admin`).  
@@ -317,22 +317,23 @@ Do **not** paste the root token into the browser unless you intend full admin.
 ### Day-to-day workflow
 
 1. **Change a secret** in Vault UI under `secret` → `collaboration` → `backend` / `frontend` / …
-2. Open **Secrets Room** → Collaboration → pick Backend/Frontend → confirm Vault vs file (drift / synced).
-3. Click **Apply** (or Jenkins → `apply-vault-env` → `TARGET=backend|frontend|notification|all`).
-4. Job writes env files and **recreates** containers.  
+2. Jenkins → **`apply-vault-env`** → `TARGET=backend|frontend|notification|all`.
+3. Job writes env files and **recreates** containers.  
    If you changed `NEXT_PUBLIC_*`, also **rebuild** the frontend image (`FORCE_REBUILD=1` or new SHA).
 
-### Keep Vault / Room healthy
+### Keep Vault healthy
 
 ```bash
 cd /home/ienetworks/workspace/tools/docker-devops
 docker compose -f vault/docker-compose.yml up -d
 ./vault/scripts/unseal.sh                          # after every Vault restart
-docker compose -f secrets-room/docker-compose.yml up -d
 
 # Seed / refresh Vault from current env files
+./scripts/configure-lab-communication.sh
 ./scripts/vault-import-from-env.sh
 ```
+
+Secrets Room (`:8300`) is optional legacy (`START_SECRETS_ROOM=1`); not required for the lab.
 
 - Runtime secrets: Vault → `apply-vault-env` → env files → recreate containers  
 - **Never commit** `collaboration/env/*.env`, `vault/secrets/*`, or `jenkins/secrets/*`  
@@ -343,7 +344,7 @@ docker compose -f secrets-room/docker-compose.yml up -d
 ## Encryption (frontend ↔ backend)
 
 Browser **Web Crypto** (`crypto.subtle`) only works in a **secure context** (HTTPS or `localhost`).  
-Lab UI is `http://172.16.50.39:3000` → encryption **must be off** on the FE.
+Lab UI is `http://172.16.50.39/` → encryption **must be off** on the FE.
 
 | Environment | Backend encrypts? | Frontend setting |
 |-------------|-------------------|------------------|
@@ -549,17 +550,18 @@ Do not hand-edit job config in the Jenkins UI if you want Git to stay source of 
 | FE `.reduce` / “not iterable” / login crashes | Encryption mismatch — BE must be plain (`node dist/main` + `NODE_ENV=development`); FE `ENCRYPTION_DISABLED=true` |
 | Device signed out after DB copy | `TRUNCATE device_sessions;` on lab DB |
 | Vault UI down / sealed | `docker compose -f vault/docker-compose.yml up -d && ./vault/scripts/unseal.sh` |
-| Secrets Room down | `docker compose -f secrets-room/docker-compose.yml up -d` |
+| Need optional Secrets Room | `START_SECRETS_ROOM=1 bash scripts/bootstrap-server-vault-room.sh` |
 | Vault “address already in use” crash loop | Compose must use `user: vault` + `entrypoint: ["vault"]` (not docker-entrypoint setcap) |
 | Jenkins job XML stale | `sync-jobs.sh` after editing `jenkins/jobs/*` |
+| Nginx 502 on `/` | `docker ps` — FE/BE/NES healthy; `sudo nginx -t && sudo systemctl reload nginx` |
 
-**Manual webhook test (on server):**
+**Manual webhook test (via nginx on server):**
 
 ```bash
 TOKEN=$(tr -d '[:space:]' < jenkins/secrets/github-webhook-collab-token.txt)
 curl -sS -X POST -H 'Content-Type: application/json' \
   --data '{"ref":"refs/heads/develop","repository":{"full_name":"ie-network-solutions/selamnew-collaboration-fe","name":"selamnew-collaboration-fe"}}' \
-  "http://127.0.0.1:8080/generic-webhook-trigger/invoke?token=${TOKEN}"
+  "http://127.0.0.1/generic-webhook-trigger/invoke?token=${TOKEN}"
 ```
 
 Expect `"triggered": true` and a new `collaboration-frontend` build.

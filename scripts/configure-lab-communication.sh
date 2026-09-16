@@ -24,25 +24,28 @@ set_kv() {
 
 log() { echo "==> $*"; }
 
-log "Configuring inter-service URLs for ${SERVER_IP}"
+# Browser + cross-stack URLs go through nginx :80 (path-based), not raw app ports.
+BASE="http://${SERVER_IP}"
+
+log "Configuring inter-service URLs for ${BASE} (nginx front door)"
 
 if [[ -f "$BE_ENV" ]]; then
-  set_kv "$BE_ENV" "APP_PUBLIC_BASE_URL" "http://${SERVER_IP}:5000"
-  set_kv "$BE_ENV" "COLLABORATION_FRONT_URL" "http://${SERVER_IP}:3000"
-  set_kv "$BE_ENV" "NOTIFICATION_SERVICE_URL" "http://${SERVER_IP}:8006/api/v1"
+  set_kv "$BE_ENV" "APP_PUBLIC_BASE_URL" "${BASE}"
+  set_kv "$BE_ENV" "COLLABORATION_FRONT_URL" "${BASE}"
+  set_kv "$BE_ENV" "NOTIFICATION_SERVICE_URL" "${BASE}/notification/api/v1"
   set_kv "$BE_ENV" "NOTIFICATION_SERVICE_AUTH_TOKEN" "Bearer lab-notification-token"
   set_kv "$BE_ENV" "PRODUCT" "COLLAB"
   chmod 600 "$BE_ENV"
 fi
 
 if [[ -f "$FE_ENV" ]]; then
-  set_kv "$FE_ENV" "NEXT_PUBLIC_APP_URL" "http://${SERVER_IP}:3000"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_API_URL" "http://${SERVER_IP}:5000/api/v1"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_API_BASE_URL" "http://${SERVER_IP}:5000/api/v1"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_URL" "http://${SERVER_IP}:5000/api/v1"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_WS_URL" "http://${SERVER_IP}:5000"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_SOCKET_URL" "http://${SERVER_IP}:5000"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_NOTIFICATION_URL" "http://${SERVER_IP}:8006/api/v1"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_APP_URL" "${BASE}"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_API_URL" "${BASE}/api/v1"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_API_BASE_URL" "${BASE}/api/v1"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_URL" "${BASE}/api/v1"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_WS_URL" "${BASE}"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_SOCKET_URL" "${BASE}"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_NOTIFICATION_URL" "${BASE}/notification/api/v1"
   chmod 600 "$FE_ENV"
 fi
 
@@ -50,7 +53,8 @@ if [[ -f "$NES_ENV" ]]; then
   set_kv "$NES_ENV" "APP_PORT" "8006"
   set_kv "$NES_ENV" "POSTGRES_HOST" "db"
   set_kv "$NES_ENV" "POSTGRES_PORT" "5432"
-  set_kv "$NES_ENV" "COLLABORATION_SERVICE_URL" "http://${SERVER_IP}:5000/api/v1"
+  set_kv "$NES_ENV" "COLLABORATION_SERVICE_URL" "${BASE}/api/v1"
+  set_kv "$NES_ENV" "FILE_SERVER_URL" "${BASE}"
   set_kv "$NES_ENV" "NOTIFICATION_SERVICE_AUTH_TOKEN" "Bearer lab-notification-token"
   set_kv "$NES_ENV" "COLLABORATION_SERVICE_AUTH_TOKEN" "Bearer lab-collaboration-token"
   chmod 600 "$NES_ENV"
