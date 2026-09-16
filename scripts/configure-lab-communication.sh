@@ -40,6 +40,7 @@ fi
 
 if [[ -f "$FE_ENV" ]]; then
   set_kv "$FE_ENV" "NEXT_PUBLIC_APP_URL" "${BASE}"
+  set_kv "$FE_ENV" "NEXT_PUBLIC_APP_BASE_URL" "${BASE}"
   set_kv "$FE_ENV" "NEXT_PUBLIC_API_URL" "${BASE}/api/v1"
   set_kv "$FE_ENV" "NEXT_PUBLIC_API_BASE_URL" "${BASE}/api/v1"
   set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_URL" "${BASE}/api/v1"

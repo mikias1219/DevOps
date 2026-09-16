@@ -210,7 +210,7 @@ sequenceDiagram
 | `collaboration-backend` | Router or manual `ACTION` | backend build/deploy + `ensure_collaboration_infra` | BE on `:5000` |
 | `collaboration-notification` | Router or manual `ACTION` | NES build/deploy + notification infra | NES on `:8006` |
 | `sync-devops-control-plane` | DevOps repo webhook | `git pull` control plane + `sync-jobs.sh` | Job XML / GWT refreshed; **no** app image rebuild |
-| `apply-vault-env` | You / Secrets Room | Vault → `env/*.env` → recreate containers | Secrets live in running stacks |
+| `apply-vault-env` | You (manual) | Vault → `env/*.env` → recreate containers | Secrets live in running stacks |
 
 ### Router matching (`github-push-collaboration`)
 
@@ -465,7 +465,7 @@ Open http://172.16.50.39:3000 and log in. Lab FE/BE use **plain JSON** (see [Enc
 2. `bash jenkins/bin/sync-jobs.sh` (or DevOps webhook)
 3. Rebuild/recreate the affected service
 
-**Change Vault secrets** → Secrets Room / Vault → `apply-vault-env` (`TARGET=all|backend|frontend|notification`).
+**Change Vault secrets** → Vault UI → Jenkins `apply-vault-env` (`TARGET=all|backend|frontend|notification`).
 
 **Copy local DB into lab** → `pg_dump` → restore into `collaboration-db-1` (Adminer `:8083`). After restore, `TRUNCATE device_sessions;` or clients get “device signed out”.
 
