@@ -370,17 +370,38 @@ delete_job "pull-collaboration-now"
 delete_job "switch-watch-branch"
 delete_job "collaboration-stack"
 
+COLLAB_EXTRA_PARAMS='        <hudson.model.ChoiceParameterDefinition>
+          <name>LAB_TIER</name>
+          <description>test=develop, staging, production (overridden by GIT_BRANCH / webhook)</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>test</string>
+              <string>staging</string>
+              <string>production</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>GIT_BRANCH</name>
+          <description>From GitHub webhook (develop|staging|production) or empty for manual tier</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>'
+
 sync_job "collaboration-backend" \
   "$JOBS_DIR/Jenkinsfile.collaboration-backend" \
-  "Backend — build/push, deploy, verify (same stages as backend/Jenkinsfile)"
+  "Backend — test/staging/production tiers (same stages as backend/Jenkinsfile)" \
+  "$COLLAB_EXTRA_PARAMS"
 
 sync_job "collaboration-frontend" \
   "$JOBS_DIR/Jenkinsfile.collaboration-frontend" \
-  "Frontend — build/push, deploy, verify (same stages as frontend/Jenkinsfile)"
+  "Frontend — test/staging/production tiers (same stages as frontend/Jenkinsfile)" \
+  "$COLLAB_EXTRA_PARAMS"
 
 sync_job "collaboration-notification" \
   "$JOBS_DIR/Jenkinsfile.collaboration-notification" \
-  "Notification service — build/push, deploy, verify (same stages as NES/Jenkinsfile)"
+  "Notification — test/staging/production tiers (same stages as NES/Jenkinsfile)" \
+  "$COLLAB_EXTRA_PARAMS"
 
 sync_choice_job "apply-vault-env" \
   "$JOBS_DIR/Jenkinsfile.apply-vault-env" \
@@ -398,7 +419,7 @@ sync_gwt_job "github-push-collaboration" \
   "GitHub webhook: push to develop on FE or BE repo starts that one Jenkins job." \
   "$SECRETS_DIR/github-webhook-collab-token.txt" \
   '$gh_ref' \
-  'refs/heads/develop'
+  'refs/heads/(develop|staging|production)'
 
 rm -f "$COOKIE_JAR"
 echo

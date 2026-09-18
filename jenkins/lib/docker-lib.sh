@@ -15,6 +15,9 @@ ENV_FILE="${ENV_FILE:-${DEVOPS_ROOT}/collaboration/.env.docker}"
 REGISTRY_COMPOSE="${DEVOPS_ROOT}/registry/docker-compose.yml"
 DEFAULT_REGISTRY="127.0.0.1:5001"
 
+# shellcheck source=/dev/null
+. "${DEVOPS_ROOT}/jenkins/lib/lab-tier.sh"
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -141,9 +144,14 @@ LAB_SERVER_IP="${LAB_SERVER_IP:-172.16.50.39}"
 
 _select_environment_lab_common() {
   _branch="$1"
-  echo "==> Select Environment (lab: develop → test host, same as prod develop → REMOTE_SERVER_TEST / staging practice)"
+  _tier="${LAB_TIER:-test}"
+  if [ -n "${GIT_BRANCH:-}" ]; then
+    _branch="$GIT_BRANCH"
+    _tier="$(lab_tier_from_branch "$_branch")"
+  fi
+  lab_apply_tier_context "$_tier" "$_branch"
+  echo "==> Select Environment (prod: branch → REMOTE_SERVER_TEST/PROD + secrets path)"
   echo "GIT_BRANCH=${_branch}"
-  echo "REMOTE_SERVER=${LAB_SERVER_IP}  # prod: SSH target from Jenkins credentials"
   echo "DEPLOY_MODE=compose  # prod: docker service update / stack deploy"
   echo "IMAGE_REGISTRY=$(registry_host)  # prod: Docker Hub (DOCKERHUB_REPO)"
 }
@@ -177,54 +185,68 @@ _fetch_application_variables_common() {
 }
 
 fetch_application_variables_backend() {
+  fetch_application_variables_lab_ssh backend
   _src="$(collaboration_source)/backend"
-  echo "==> Fetch Application Variables (prod: grep secrets file over SSH)"
-  _fetch_application_variables_common "$_src" "$(backend_branch)" \
-    "$(registry_host)/collaboration-backend" "backend"
   echo "DOCKERFILE=${DEVOPS_ROOT}/collaboration/docker/backend.Dockerfile"
-  test -d "$_src" || { echo "Missing backend source at ${_src}" >&2; return 1; }
+  test -d "$_src" || echo "WARN: backend source missing — run Pull Latest Changes"
 }
 
 fetch_application_variables_frontend() {
+  fetch_application_variables_lab_ssh frontend
   _src="$(collaboration_source)/frontend"
-  echo "==> Fetch Application Variables (prod: grep secrets file over SSH)"
-  _fetch_application_variables_common "$_src" "$(frontend_branch)" \
-    "$(registry_host)/collaboration-frontend" "frontend"
   echo "DOCKERFILE=${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile"
-  _fe_env="${DEVOPS_ROOT}/collaboration/env/frontend.env"
-  echo "VAULT_ADDR=$(env_file_get "$_fe_env" VAULT_ADDR 'http://127.0.0.1:8200')"
-  echo "VAULT_SECRET_PATH=$(env_file_get "$_fe_env" VAULT_SECRET_PATH 'secret/collaboration/frontend')"
-  echo "    (lab: NEXT_PUBLIC_* from frontend.env at build; prod: Vault build-args on remote)"
-  test -d "$_src" || { echo "Missing frontend source at ${_src}" >&2; return 1; }
+  _tier="${LAB_TIER:-test}"
+  _fe_env="${DEVOPS_ROOT}/collaboration/env/${_tier}/frontend.env"
+  if [ ! -f "$_fe_env" ]; then
+    _fe_env="${DEVOPS_ROOT}/collaboration/env/frontend.env"
+  fi
+  echo "    (lab: NEXT_PUBLIC_* from ${_fe_env}; prod: Vault build-args on remote SSH build)"
+  test -d "$_src" || echo "WARN: frontend source missing — run Pull Latest Changes"
 }
 
 fetch_application_variables_notification() {
+  fetch_application_variables_lab_ssh notification
   _src="$(notification_source)"
-  echo "==> Fetch Application Variables (prod: grep secrets file over SSH)"
-  _fetch_application_variables_common "$_src" "$(notification_branch)" \
-    "$(registry_host)/collaboration-notification" "notification"
   echo "DOCKERFILE=${DEVOPS_ROOT}/notification/docker/notification.Dockerfile"
-  test -d "$_src" || { echo "Missing notification source at ${_src}" >&2; return 1; }
+  test -d "$_src" || echo "WARN: notification source missing — run Pull Latest Changes"
 }
 
 prepare_repository_lab_backend() {
-  echo "==> Prepare Repository (prod: ssh chown/chmod REPO_DIR on REMOTE_SERVER)"
+  _dir="$(collaboration_source)/backend"
+  prepare_repository_lab_ssh "$_dir"
   ensure_local_registry
   ensure_collaboration_infra
-  test -r "$(collaboration_source)/backend/package.json"
+  _secrets="$(lab_tier_secrets_file backend "${LAB_TIER:-test}")"
+  _url="$(grep_lab_secret "$_secrets" REPO_URL "")"
+  if [ -n "$_url" ] && [ ! -f "$_dir/package.json" ]; then
+    ensure_tier_git_checkout "$_dir" "$_url" "$(backend_branch)"
+  fi
+  test -r "$_dir/package.json" || { echo "Missing $_dir/package.json" >&2; return 1; }
 }
 
 prepare_repository_lab_frontend() {
-  echo "==> Prepare Repository (prod: ssh chown/chmod REPO_DIR on REMOTE_SERVER)"
+  _dir="$(collaboration_source)/frontend"
+  prepare_repository_lab_ssh "$_dir"
   ensure_local_registry
-  test -r "$(collaboration_source)/frontend/package.json"
+  _secrets="$(lab_tier_secrets_file frontend "${LAB_TIER:-test}")"
+  _url="$(grep_lab_secret "$_secrets" REPO_URL "")"
+  if [ -n "$_url" ] && [ ! -f "$_dir/package.json" ]; then
+    ensure_tier_git_checkout "$_dir" "$_url" "$(frontend_branch)"
+  fi
+  test -r "$_dir/package.json" || { echo "Missing $_dir/package.json" >&2; return 1; }
 }
 
 prepare_repository_lab_notification() {
-  echo "==> Prepare Repository (prod: ssh chown/chmod REPO_DIR on REMOTE_SERVER)"
+  _dir="$(notification_source)"
+  prepare_repository_lab_ssh "$_dir"
   ensure_local_registry
   ensure_notification_infra
-  test -r "$(notification_source)/package.json"
+  _secrets="$(lab_tier_secrets_file notification "${LAB_TIER:-test}")"
+  _url="$(grep_lab_secret "$_secrets" REPO_URL "")"
+  if [ -n "$_url" ] && [ ! -f "$_dir/package.json" ]; then
+    ensure_tier_git_checkout "$_dir" "$_url" "$(notification_branch)"
+  fi
+  test -r "$_dir/package.json" || { echo "Missing $_dir/package.json" >&2; return 1; }
 }
 
 _remove_migrations_in_dir() {
@@ -441,10 +463,30 @@ _docker_build_with_cache() {
     "$@"
 }
 
+_frontend_env_file() {
+  _tier="${LAB_TIER:-test}"
+  _f="${DEVOPS_ROOT}/collaboration/env/${_tier}/frontend.env"
+  if [ -f "$_f" ]; then
+    printf '%s' "$_f"
+    return 0
+  fi
+  printf '%s/collaboration/env/frontend.env' "$DEVOPS_ROOT"
+}
+
 _frontend_public_arg() {
   _key="$1"
   _default="$2"
-  env_file_get "${DEVOPS_ROOT}/collaboration/env/frontend.env" "$_key" "$_default"
+  if [ -n "${LAB_PUBLIC_BASE:-}" ]; then
+    case "$_key" in
+      NEXT_PUBLIC_APP_URL | NEXT_PUBLIC_WS_URL | NEXT_PUBLIC_COLLABORATION_SOCKET_URL)
+        _default="${LAB_PUBLIC_BASE}"
+        ;;
+      NEXT_PUBLIC_API_URL | NEXT_PUBLIC_API_BASE_URL | NEXT_PUBLIC_COLLABORATION_URL)
+        _default="${LAB_PUBLIC_BASE}/api/v1"
+        ;;
+    esac
+  fi
+  env_file_get "$(_frontend_env_file)" "$_key" "$_default"
 }
 
 build_and_push_collaboration_backend() {
@@ -708,8 +750,8 @@ install_npm_packages() { ensure_npm_packages "$@"; }
 # Notification-and-email-service (third app — lab mirrors production Jenkinsfile)
 # ---------------------------------------------------------------------------
 
-NOTIFICATION_COMPOSE="${DEVOPS_ROOT}/notification/docker-compose.yml"
-NOTIFICATION_ENV_FILE="${DEVOPS_ROOT}/notification/.env.docker"
+NOTIFICATION_COMPOSE="${NOTIFICATION_COMPOSE:-${DEVOPS_ROOT}/notification/docker-compose.yml}"
+NOTIFICATION_ENV_FILE="${NOTIFICATION_ENV_FILE:-${DEVOPS_ROOT}/notification/.env.docker}"
 
 notification_source() {
   _base="$(collaboration_source)"

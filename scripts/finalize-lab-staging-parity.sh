@@ -14,7 +14,10 @@ SERVER_IP="${SERVER_IP:-172.16.50.39}"
 
 log() { echo "==> $*"; }
 
-log "Patch inter-service URLs (nginx :80, same as staging test URLs pattern)"
+log "Initialize test | staging | production tiers (secrets templates, env files, checkouts layout)"
+bash "$ROOT/scripts/setup-lab-multi-env.sh"
+
+log "Patch inter-service URLs (nginx :80 per tier)"
 bash "$ROOT/scripts/configure-lab-communication.sh"
 
 log "Vault unseal + import env (if Vault available)"
@@ -23,11 +26,18 @@ bash "$ROOT/scripts/vault-import-from-env.sh" 2>/dev/null || true
 
 log "Install nginx front door"
 if [ -f "$ROOT/nginx/selamnew-collab.conf" ]; then
-  sudo cp "$ROOT/nginx/selamnew-collab.conf" /etc/nginx/sites-available/selamnew-collab
-  sudo ln -sfn /etc/nginx/sites-available/selamnew-collab /etc/nginx/sites-enabled/selamnew-collab
-  sudo rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/selamnew-devops-webhooks 2>/dev/null || true
-  sudo nginx -t
-  sudo systemctl reload nginx
+  _sudo() {
+    if [ -n "${SUDO_PASSWORD:-}" ]; then
+      echo "$SUDO_PASSWORD" | sudo -S "$@"
+    else
+      sudo "$@"
+    fi
+  }
+  _sudo cp "$ROOT/nginx/selamnew-collab.conf" /etc/nginx/sites-available/selamnew-collab
+  _sudo ln -sfn /etc/nginx/sites-available/selamnew-collab /etc/nginx/sites-enabled/selamnew-collab
+  _sudo rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/selamnew-devops-webhooks 2>/dev/null || true
+  _sudo nginx -t
+  _sudo systemctl reload nginx
 fi
 
 log "Sync Jenkins jobs from DevOps/jenkins/jobs (production stage parity)"

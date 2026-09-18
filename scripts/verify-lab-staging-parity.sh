@@ -23,9 +23,17 @@ grep -q 'select_environment_lab_backend' "$ROOT/jenkins/lib/docker-lib.sh" && ok
 echo
 echo "2. Jenkins jobs (expect 6)"
 if curl -sf http://127.0.0.1:8080/login >/dev/null 2>&1; then
+  JAUTH=()
+  if [ -f "$ROOT/jenkins/secrets/admin.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ROOT/jenkins/secrets/admin.env"
+    set +a
+    JAUTH=(-u "${JENKINS_ADMIN_USER}:${JENKINS_ADMIN_PASS}")
+  fi
   for j in github-push-collaboration collaboration-backend collaboration-frontend \
     collaboration-notification apply-vault-env sync-devops-control-plane; do
-    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/job/${j}/api/json" 2>/dev/null || echo 000)
+    code=$(curl -s "${JAUTH[@]}" -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/job/${j}/api/json" 2>/dev/null || echo 000)
     [ "$code" = "200" ] && ok "job ${j}" || bad "job ${j} (HTTP ${code})"
   done
 else
@@ -46,12 +54,21 @@ docker ps --format '{{.Names}}' | grep -qx notification-notification-1 && ok "no
 docker ps --format '{{.Names}}' | grep -qx selamnew-vault && ok "vault" || warn "vault container"
 
 echo
-echo "5. Nginx :80 (user-facing URLs like staging test entry)"
+echo "5. Nginx :80 (test + staging + production path URLs)"
 if systemctl is-active nginx >/dev/null 2>&1; then
   ok "nginx active"
-  curl -sf -o /dev/null -w '' "http://127.0.0.1/" && ok "GET /" || bad "GET /"
-  curl -sf "http://127.0.0.1/api/v1/health" | grep -q '"status"' && ok "GET /api/v1/health" || bad "GET /api/v1/health"
-  curl -sf "http://127.0.0.1/notification/api/v1/health" | grep -q '"status"' && ok "GET /notification/api/v1/health" || bad "NES health via nginx"
+  curl -sf -o /dev/null -w '' "http://127.0.0.1/" && ok "GET / (test FE)" || bad "GET /"
+  curl -sf "http://127.0.0.1/api/v1/health" | grep -q '"status"' && ok "GET /api/v1/health (test BE)" || bad "GET /api/v1/health"
+  curl -sf "http://127.0.0.1/notification/api/v1/health" | grep -q '"status"' && ok "GET /notification/... (test NES)" || bad "NES test health"
+  for prefix in staging production; do
+    if curl -sf -o /dev/null "http://127.0.0.1/${prefix}/" 2>/dev/null; then
+      curl -sf "http://127.0.0.1/${prefix}/api/v1/health" 2>/dev/null | grep -q '"status"' \
+        && ok "GET /${prefix}/api/v1/health" || warn "/${prefix}/ stack not healthy yet (run Jenkins build-and-start)"
+    else
+      warn "/${prefix}/ not deployed yet"
+    fi
+  done
+  [ -f "$ROOT/collaboration/lab-secrets/test/.collab-back-env" ] && ok "lab-secrets/test" || warn "run setup-lab-multi-env.sh"
 else
   bad "nginx not active"
 fi

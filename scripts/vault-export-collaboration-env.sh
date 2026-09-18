@@ -6,7 +6,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SECRETS_DIR="$ROOT/vault/secrets"
+LAB_TIER="${LAB_TIER:-test}"
 OUT_DIR="$ROOT/collaboration/env"
+if [[ "$LAB_TIER" != test ]]; then
+  OUT_DIR="$ROOT/collaboration/env/${LAB_TIER}"
+  mkdir -p "$OUT_DIR"
+fi
 # Prefer CLI arg (vault-export-all-env.sh passes both|backend|frontend).
 # Env TARGET may be "all" from apply-vault-env — map that to both here.
 TARGET="${1:-${TARGET:-both}}"
@@ -161,6 +166,16 @@ process.stdin.on("end", () => {
   chmod 600 "$out_file" 2>/dev/null || true
 }
 
+vault_kv_path() {
+  local app="$1"
+  local tier="${LAB_TIER:-test}"
+  local p="collaboration/${tier}/${app}"
+  if ! vault_cmd kv get "secret/${p}" >/dev/null 2>&1; then
+    p="collaboration/${app}"
+  fi
+  printf '%s' "$p"
+}
+
 export_path() {
   local mount_path="$1"
   local out_file="$2"
@@ -172,14 +187,14 @@ export_path() {
 
 case "$TARGET" in
   backend)
-    export_path "collaboration/backend" "$OUT_DIR/backend.env"
+    export_path "$(vault_kv_path backend)" "$OUT_DIR/backend.env"
     ;;
   frontend)
-    export_path "collaboration/frontend" "$OUT_DIR/frontend.env"
+    export_path "$(vault_kv_path frontend)" "$OUT_DIR/frontend.env"
     ;;
   both)
-    export_path "collaboration/backend" "$OUT_DIR/backend.env"
-    export_path "collaboration/frontend" "$OUT_DIR/frontend.env"
+    export_path "$(vault_kv_path backend)" "$OUT_DIR/backend.env"
+    export_path "$(vault_kv_path frontend)" "$OUT_DIR/frontend.env"
     if vault_cmd kv get "secret/collaboration/compose" >/dev/null 2>&1; then
       export_path "collaboration/compose" "$ROOT/collaboration/.env.docker" || true
     fi

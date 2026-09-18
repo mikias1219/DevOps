@@ -1,0 +1,54 @@
+name: notification-staging
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${NOTIFICATION_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-nes_staging_secret}
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME:-selamnew-notification-staging}
+    ports:
+      - "${NOTIFICATION_POSTGRES_HOST_PORT:-5438}:5432"
+    volumes:
+      - notification_staging_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${NOTIFICATION_DB_USER:-postgres} -d ${NOTIFICATION_DB_NAME:-selamnew-notification-staging}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  notification:
+    image: ${REGISTRY:-127.0.0.1:5001}/collaboration-notification:${NOTIFICATION_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./env/staging/notification.env
+    environment:
+      APP_PORT: "8006"
+      DB_HOST: db
+      DB_PORT: "5432"
+      FILE_SERVER_URL: ${LAB_PUBLIC_BASE:-http://172.16.50.39/staging}
+      PRODUCT: ${PRODUCT:-COLLAB}
+      SOURCE_SERVICE: ${SOURCE_SERVICE:-collaboration}
+    ports:
+      - "${NOTIFICATION_HOST_PORT:-8016}:8006"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:8006/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+volumes:
+  notification_staging_pgdata:

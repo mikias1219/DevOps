@@ -1,0 +1,129 @@
+# Production tier (lab mirror) — branch production → http://SERVER/production/
+name: collaboration-production
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-collab_prod_secret}
+      POSTGRES_DB: ${DB_NAME:-selamnew-collab-production}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5437}:5432"
+    volumes:
+      - collaboration_production_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-selamnew-collab-production}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_HOST_PORT:-6383}:6379"
+    volumes:
+      - collaboration_production_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      cluster.name: collaboration-production
+    ports:
+      - "127.0.0.1:${ELASTICSEARCH_HOST_PORT:-9220}:9200"
+    volumes:
+      - collaboration_production_esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  backend:
+    image: ${REGISTRY:-127.0.0.1:5001}/collaboration-backend:${BACKEND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    env_file:
+      - ./env/production/backend.env
+    command: ["node", "dist/main"]
+    environment:
+      APP_PORT: "5000"
+      APP_PUBLIC_BASE_URL: ${LAB_PUBLIC_BASE:-http://172.16.50.39/production}
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-selamnew-collab-production}
+      DB_PASSWORD: ${DB_PASSWORD:-collab_prod_secret}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ELASTICSEARCH_NODE: http://elasticsearch:9200
+      COLLABORATION_FRONT_URL: ${LAB_PUBLIC_BASE:-http://172.16.50.39/production}
+    ports:
+      - "${BACKEND_HOST_PORT:-5020}:5000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:5000/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+  frontend:
+    image: ${REGISTRY:-127.0.0.1:5001}/collaboration-frontend:${FRONTEND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    env_file:
+      - ./env/production/frontend.env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${FRONTEND_HOST_PORT:-3020}:3001"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:3001/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+volumes:
+  collaboration_production_pgdata:
+  collaboration_production_redis:
+  collaboration_production_esdata:

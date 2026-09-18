@@ -1,6 +1,4 @@
-// Lab pipeline — same stage names as Notification-and-email-service/Jenkinsfile (production).
-// Production: IE Jenkins → SSH → Docker Hub → Swarm. Lab: docker-lib.sh → registry → Compose.
-// See LAB-PRODUCTION-PARITY.md.
+// Lab — same stage names as Notification-and-email-service/Jenkinsfile (production).
 
 pipeline {
   agent any
@@ -14,20 +12,39 @@ pipeline {
 
   environment {
     DEVOPS_ROOT = '/var/devops'
-    COMPOSE_FILE = '/var/devops/notification/docker-compose.yml'
-    ENV_FILE = '/var/devops/notification/.env.docker'
     SERVICE = 'notification'
   }
 
   stages {
     stage('Select Environment') {
       steps {
-        sh '''#!/usr/bin/env bash
-          set -euo pipefail
-          . /var/devops/jenkins/lib/docker-lib.sh
-          echo "ACTION=${ACTION}"
-          select_environment_lab_notification
-        '''
+        script {
+          def branch = (params.GIT_BRANCH ?: '').trim()
+          if (!branch && env.gh_ref) {
+            branch = env.gh_ref.replace('refs/heads/', '')
+          }
+          if (!branch) {
+            switch (params.LAB_TIER) {
+              case 'staging': branch = 'staging'; break
+              case 'production': branch = 'production'; break
+              default: branch = 'develop'; break
+            }
+          }
+          def tier = params.LAB_TIER ?: 'test'
+          if (branch.contains('production')) {
+            tier = 'production'
+          } else if (branch.contains('staging')) {
+            tier = 'staging'
+          } else {
+            tier = 'test'
+          }
+          env.LAB_TIER = tier
+          env.GIT_BRANCH = branch
+          env.REMOTE_SERVER = 'ienetworks@172.16.50.39'
+          env.SECRETS_PATH = "/var/devops/collaboration/lab-secrets/${tier}/.collab-nes-env"
+          echo "GIT_BRANCH=${branch} → LAB_TIER=${tier}"
+          echo "ACTION=${params.ACTION}"
+        }
       }
     }
 
@@ -35,51 +52,61 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
+          lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           fetch_application_variables_notification
         '''
       }
     }
 
     stage('Prepare Repository') {
-      when { expression { return env.ACTION != 'stop' } }
+      when { expression { return params.ACTION != 'stop' } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
+          lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           prepare_repository_lab_notification
         '''
       }
     }
 
     stage('Pull Latest Changes') {
-      when { expression { return env.ACTION == 'update-from-github' } }
+      when { expression { return params.ACTION == 'update-from-github' } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
+          lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           git_pull_repo "$(notification_source)" "$(notification_branch)"
         '''
       }
     }
 
     stage('Remove existing migrations') {
-      when { expression { return !['start', 'stop', 'restart', 'recreate'].contains(env.ACTION) } }
+      when { expression { return !['start', 'stop', 'restart', 'recreate'].contains(params.ACTION) } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
+          lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           remove_existing_migrations_notification
         '''
       }
     }
 
     stage('Build and Push Docker Image') {
-      when { expression { return !['start', 'stop', 'restart', 'recreate'].contains(env.ACTION) } }
+      when { expression { return !['start', 'stop', 'restart', 'recreate'].contains(params.ACTION) } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
+          lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           build_and_push_collaboration_notification
         '''
       }
@@ -89,29 +116,27 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
+          lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           case "${ACTION}" in
-            stop)
-              stop_notification_service "${SERVICE}"
-              ;;
+            stop) stop_notification_service "${SERVICE}" ;;
             start|restart|recreate|build-and-start|update-from-github)
-              deploy_notification_service "${SERVICE}"
-              ;;
-            *)
-              echo "Unknown ACTION=${ACTION}" >&2
-              exit 1
-              ;;
+              deploy_notification_service "${SERVICE}" ;;
+            *) echo "Unknown ACTION=${ACTION}" >&2; exit 1 ;;
           esac
         '''
       }
     }
 
     stage('Verify Deployment') {
-      when { expression { return env.ACTION != 'stop' } }
+      when { expression { return params.ACTION != 'stop' } }
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
+          lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           wait_notification_smoke "${SERVICE}" 40
         '''
       }
@@ -119,7 +144,7 @@ pipeline {
   }
 
   post {
-    success { echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} ACTION=${env.ACTION}" }
+    success { echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} tier=${env.LAB_TIER}" }
     failure { echo 'Deployment failed — see Console Output.' }
   }
 }

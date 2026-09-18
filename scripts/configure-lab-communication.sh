@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# Patch lab env files so FE ↔ BE ↔ Notification communicate on SERVER_IP.
-# Run before vault-import-from-env.sh (idempotent).
+# Patch tier env files so FE ↔ BE ↔ NES use nginx path URLs for each lab tier.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER_IP="${SERVER_IP:-172.16.50.39}"
-
-BE_ENV="$ROOT/collaboration/env/backend.env"
-FE_ENV="$ROOT/collaboration/env/frontend.env"
-NES_ENV="$ROOT/notification/env/notification.env"
+LAB_TIER="${LAB_TIER:-all}"
 
 set_kv() {
   local file="$1"
@@ -22,43 +18,67 @@ set_kv() {
   fi
 }
 
-log() { echo "==> $*"; }
+patch_tier() {
+  local tier="$1"
+  local base
+  case "$tier" in
+    staging) base="http://${SERVER_IP}/staging" ;;
+    production) base="http://${SERVER_IP}/production" ;;
+    *) base="http://${SERVER_IP}" ;;
+  esac
 
-# Browser + cross-stack URLs go through nginx :80 (path-based), not raw app ports.
-BASE="http://${SERVER_IP}"
+  local be_env fe_env nes_env
+  if [ "$tier" = test ]; then
+    be_env="$ROOT/collaboration/env/backend.env"
+    fe_env="$ROOT/collaboration/env/frontend.env"
+    nes_env="$ROOT/notification/env/notification.env"
+  else
+    be_env="$ROOT/collaboration/env/${tier}/backend.env"
+    fe_env="$ROOT/collaboration/env/${tier}/frontend.env"
+    nes_env="$ROOT/notification/env/${tier}/notification.env"
+  fi
 
-log "Configuring inter-service URLs for ${BASE} (nginx front door)"
+  echo "==> URLs for tier=${tier} base=${base}"
 
-if [[ -f "$BE_ENV" ]]; then
-  set_kv "$BE_ENV" "APP_PUBLIC_BASE_URL" "${BASE}"
-  set_kv "$BE_ENV" "COLLABORATION_FRONT_URL" "${BASE}"
-  set_kv "$BE_ENV" "NOTIFICATION_SERVICE_URL" "${BASE}/notification/api/v1"
-  set_kv "$BE_ENV" "NOTIFICATION_SERVICE_AUTH_TOKEN" "Bearer lab-notification-token"
-  set_kv "$BE_ENV" "PRODUCT" "COLLAB"
-  chmod 600 "$BE_ENV"
-fi
+  if [[ -f "$be_env" ]]; then
+    set_kv "$be_env" "APP_PUBLIC_BASE_URL" "${base}"
+    set_kv "$be_env" "COLLABORATION_FRONT_URL" "${base}"
+    set_kv "$be_env" "NOTIFICATION_SERVICE_URL" "${base}/notification/api/v1"
+    chmod 600 "$be_env"
+  fi
 
-if [[ -f "$FE_ENV" ]]; then
-  set_kv "$FE_ENV" "NEXT_PUBLIC_APP_URL" "${BASE}"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_APP_BASE_URL" "${BASE}"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_API_URL" "${BASE}/api/v1"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_API_BASE_URL" "${BASE}/api/v1"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_URL" "${BASE}/api/v1"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_WS_URL" "${BASE}"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_COLLABORATION_SOCKET_URL" "${BASE}"
-  set_kv "$FE_ENV" "NEXT_PUBLIC_NOTIFICATION_URL" "${BASE}/notification/api/v1"
-  chmod 600 "$FE_ENV"
-fi
+  if [[ -f "$fe_env" ]]; then
+    set_kv "$fe_env" "NEXT_PUBLIC_APP_URL" "${base}"
+    set_kv "$fe_env" "NEXT_PUBLIC_APP_BASE_URL" "${base}"
+    set_kv "$fe_env" "NEXT_PUBLIC_API_URL" "${base}/api/v1"
+    set_kv "$fe_env" "NEXT_PUBLIC_API_BASE_URL" "${base}/api/v1"
+    set_kv "$fe_env" "NEXT_PUBLIC_COLLABORATION_URL" "${base}/api/v1"
+    set_kv "$fe_env" "NEXT_PUBLIC_WS_URL" "${base}"
+    set_kv "$fe_env" "NEXT_PUBLIC_COLLABORATION_SOCKET_URL" "${base}"
+    set_kv "$fe_env" "NEXT_PUBLIC_NOTIFICATION_URL" "${base}/notification/api/v1"
+    chmod 600 "$fe_env"
+  fi
 
-if [[ -f "$NES_ENV" ]]; then
-  set_kv "$NES_ENV" "APP_PORT" "8006"
-  set_kv "$NES_ENV" "POSTGRES_HOST" "db"
-  set_kv "$NES_ENV" "POSTGRES_PORT" "5432"
-  set_kv "$NES_ENV" "COLLABORATION_SERVICE_URL" "${BASE}/api/v1"
-  set_kv "$NES_ENV" "FILE_SERVER_URL" "${BASE}"
-  set_kv "$NES_ENV" "NOTIFICATION_SERVICE_AUTH_TOKEN" "Bearer lab-notification-token"
-  set_kv "$NES_ENV" "COLLABORATION_SERVICE_AUTH_TOKEN" "Bearer lab-collaboration-token"
-  chmod 600 "$NES_ENV"
-fi
+  if [[ -f "$nes_env" ]]; then
+    set_kv "$nes_env" "COLLABORATION_SERVICE_URL" "${base}/api/v1"
+    set_kv "$nes_env" "FILE_SERVER_URL" "${base}"
+    chmod 600 "$nes_env"
+  fi
+}
 
-log "Done. Import into Vault: bash scripts/vault-import-all-env.sh"
+case "$LAB_TIER" in
+  all)
+    patch_tier test
+    patch_tier staging
+    patch_tier production
+    ;;
+  test|staging|production)
+    patch_tier "$LAB_TIER"
+    ;;
+  *)
+    echo "LAB_TIER must be test|staging|production|all" >&2
+    exit 1
+    ;;
+esac
+
+echo "Done."
