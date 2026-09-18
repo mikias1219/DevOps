@@ -18,9 +18,9 @@ pipeline {
     stage('Why this job ran') {
       steps {
         script {
-          def causes = currentBuild.getBuildCauses().collect { it.shortDescription }.join(' | ')
-          echo "BUILD CAUSE: ${causes}"
-          echo "Router: push develop|staging|production → matching tier + app job."
+          echo "BUILD CAUSE: ${currentBuild.getBuildCauses().collect { it.shortDescription }.join(' | ')}"
+          echo "Router → collaboration-{backend|frontend|notification}-{test|staging|production}"
+          echo "  develop → *-test   | staging → *-staging | production → *-production"
         }
       }
     }
@@ -34,16 +34,14 @@ pipeline {
           if (!repoName && repo.contains('/')) {
             repoName = repo.tokenize('/')[-1]
           }
-          echo "gh_ref=${ref}"
-          echo "gh_repo=${repo}"
+          echo "gh_ref=${ref} gh_repo=${repo}"
 
-          env.RUN_BACKEND = 'false'
-          env.RUN_FRONTEND = 'false'
-          env.RUN_NOTIFICATION = 'false'
+          env.TARGET_JOB = ''
           env.SKIP_DEPLOY = 'false'
+          env.GIT_BRANCH = ''
 
           if (!repo && !repoName) {
-            echo "No GitHub payload (manual Build Now). Webhook-only — not deploying."
+            echo "No GitHub payload — webhook-only job."
             env.SKIP_DEPLOY = 'true'
             return
           }
@@ -51,87 +49,55 @@ pipeline {
           def pushed = ref.startsWith('refs/heads/') ? ref.substring('refs/heads/'.length()) : ref
           env.GIT_BRANCH = pushed
 
-          def tier = 'test'
+          def suffix = ''
           if (pushed.contains('production')) {
-            tier = 'production'
+            suffix = 'production'
           } else if (pushed == 'staging') {
-            tier = 'staging'
+            suffix = 'staging'
           } else if (pushed == 'develop' || pushed.contains('develop')) {
-            tier = 'test'
+            suffix = 'test'
           } else {
-            echo "Ignoring ${ref} — only develop, staging, production trigger deploys."
+            echo "Ignoring ${ref} — only develop|staging|production"
             env.SKIP_DEPLOY = 'true'
             return
           }
-          env.LAB_TIER = tier
 
           def isBackend = repo == env.BACKEND_GITHUB || repoName == 'selamnew-collaboration-backend'
           def isFrontend = repo == env.FRONTEND_GITHUB || repoName == 'selamnew-collaboration-fe'
           def isNotification = repo == env.NOTIFICATION_GITHUB || repoName == 'notification-and-email-service'
 
           if (isBackend && !isFrontend && !isNotification) {
-            env.RUN_BACKEND = 'true'
+            env.TARGET_JOB = "collaboration-backend-${suffix}"
           } else if (isFrontend && !isBackend && !isNotification) {
-            env.RUN_FRONTEND = 'true'
+            env.TARGET_JOB = "collaboration-frontend-${suffix}"
           } else if (isNotification && !isBackend && !isFrontend) {
-            env.RUN_NOTIFICATION = 'true'
+            env.TARGET_JOB = "collaboration-notification-${suffix}"
           } else {
-            echo "Unknown repo '${repo}'. Not starting a job."
+            echo "Unknown repo '${repo}'"
             env.SKIP_DEPLOY = 'true'
+            return
           }
-
-          if (env.SKIP_DEPLOY != 'true') {
-            echo "→ tier=${tier} branch=${pushed} (prod: same branch → TEST/STAGING/PROD server)"
-          }
+          echo "→ ${env.TARGET_JOB} (branch=${pushed})"
         }
       }
     }
 
-    stage('Backend from GitHub') {
-      when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_BACKEND == 'true' } }
+    stage('Trigger tier job') {
+      when { expression { return env.SKIP_DEPLOY != 'true' && env.TARGET_JOB } }
       steps {
-        build job: 'collaboration-backend',
+        build job: "${env.TARGET_JOB}",
           wait: false,
           propagate: false,
           parameters: [
             string(name: 'ACTION', value: 'update-from-github'),
             string(name: 'GIT_BRANCH', value: "${env.GIT_BRANCH}"),
-            string(name: 'LAB_TIER', value: "${env.LAB_TIER}"),
-          ]
-      }
-    }
-
-    stage('Frontend from GitHub') {
-      when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_FRONTEND == 'true' } }
-      steps {
-        build job: 'collaboration-frontend',
-          wait: false,
-          propagate: false,
-          parameters: [
-            string(name: 'ACTION', value: 'update-from-github'),
-            string(name: 'GIT_BRANCH', value: "${env.GIT_BRANCH}"),
-            string(name: 'LAB_TIER', value: "${env.LAB_TIER}"),
-          ]
-      }
-    }
-
-    stage('Notification from GitHub') {
-      when { expression { return env.SKIP_DEPLOY != 'true' && env.RUN_NOTIFICATION == 'true' } }
-      steps {
-        build job: 'collaboration-notification',
-          wait: false,
-          propagate: false,
-          parameters: [
-            string(name: 'ACTION', value: 'update-from-github'),
-            string(name: 'GIT_BRANCH', value: "${env.GIT_BRANCH}"),
-            string(name: 'LAB_TIER', value: "${env.LAB_TIER}"),
           ]
       }
     }
   }
 
   post {
-    success { echo 'Webhook router finished' }
-    failure { echo 'Webhook router failed — see downstream job console' }
+    success { echo "Router done → ${env.TARGET_JOB ?: 'none'}" }
+    failure { echo 'Webhook router failed' }
   }
 }

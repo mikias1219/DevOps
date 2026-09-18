@@ -1,5 +1,5 @@
-// Lab — same stage names & branch→environment rules as backend/Jenkinsfile (production).
-// Prod: IE Jenkins → SSH → Docker Hub → Swarm. Lab: tier context + docker-lib → registry → Compose.
+// Lab backend — job name selects tier: collaboration-backend-{test|staging|production}
+// Same stages as backend/Jenkinsfile. develop → test URLs http://SERVER/
 
 pipeline {
   agent any
@@ -20,47 +20,25 @@ pipeline {
     stage('Select Environment') {
       steps {
         script {
-          def branch = (params.GIT_BRANCH ?: '').trim()
-          if (!branch && env.gh_ref) {
-            branch = env.gh_ref.replace('refs/heads/', '')
-          }
-          if (!branch) {
-            switch (params.LAB_TIER) {
-              case 'staging': branch = 'staging'; break
-              case 'production': branch = 'production'; break
-              default: branch = 'develop'; break
-            }
-          }
-
-          def tier = params.LAB_TIER ?: 'test'
-          if (branch.contains('production')) {
-            tier = 'production'
-            env.SECRET_KEY = 'lab-production'
-          } else if (branch.contains('staging')) {
-            tier = 'staging'
-            env.SECRET_KEY = 'lab-staging'
+          def jn = env.JOB_NAME ?: ''
+          def tier = 'test'
+          def branch = 'develop'
+          if (jn.endsWith('-production') || jn.contains('-production')) {
+            tier = 'production'; branch = 'production'
+          } else if (jn.endsWith('-staging') || jn.contains('-staging')) {
+            tier = 'staging'; branch = 'staging'
           } else {
-            tier = 'test'
-            env.SECRET_KEY = 'lab-test'
+            tier = 'test'; branch = 'develop'
           }
-
+          if (params.GIT_BRANCH?.trim()) {
+            branch = params.GIT_BRANCH.trim()
+          }
           env.LAB_TIER = tier
           env.GIT_BRANCH = branch
           env.REMOTE_SERVER = 'ienetworks@172.16.50.39'
           env.SECRETS_PATH = "/var/devops/collaboration/lab-secrets/${tier}/.collab-back-env"
-          env.COMPOSE_FILE = tier == 'staging'
-            ? '/var/devops/collaboration/docker-compose.staging.yml'
-            : tier == 'production'
-              ? '/var/devops/collaboration/docker-compose.production.yml'
-              : '/var/devops/collaboration/docker-compose.yml'
-          env.ENV_FILE = tier == 'staging'
-            ? '/var/devops/collaboration/.env.docker.staging'
-            : tier == 'production'
-              ? '/var/devops/collaboration/.env.docker.production'
-              : '/var/devops/collaboration/.env.docker'
-
-          echo "GIT_BRANCH=${branch} → LAB_TIER=${tier} (prod: develop→TEST, staging→STAGING, production→PROD server)"
-          echo "REMOTE_SERVER=${env.REMOTE_SERVER} SECRETS_PATH=${env.SECRETS_PATH}"
+          echo "JOB=${jn} → LAB_TIER=${tier} GIT_BRANCH=${branch}"
+          echo "URLs: " + (tier == 'test' ? 'http://172.16.50.39/' : "http://172.16.50.39/${tier}/")
           echo "ACTION=${params.ACTION}"
         }
       }
@@ -70,8 +48,7 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export LAB_TIER="${LAB_TIER}"
-          export GIT_BRANCH="${GIT_BRANCH}"
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
           lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           fetch_application_variables_backend
@@ -84,8 +61,7 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export LAB_TIER="${LAB_TIER}"
-          export GIT_BRANCH="${GIT_BRANCH}"
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
           lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           prepare_repository_lab_backend
@@ -98,8 +74,7 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export LAB_TIER="${LAB_TIER}"
-          export GIT_BRANCH="${GIT_BRANCH}"
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
           lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           git_pull_repo "$(collaboration_source)/backend" "$(backend_branch)"
@@ -112,7 +87,7 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export LAB_TIER="${LAB_TIER}"
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
           lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           remove_existing_migrations_backend
@@ -125,7 +100,7 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export LAB_TIER="${LAB_TIER}"
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
           lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           build_and_push_collaboration_backend
@@ -137,7 +112,7 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export LAB_TIER="${LAB_TIER}"
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
           lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           case "${ACTION}" in
@@ -155,7 +130,7 @@ pipeline {
       steps {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
-          export LAB_TIER="${LAB_TIER}"
+          export LAB_TIER GIT_BRANCH
           . /var/devops/jenkins/lib/docker-lib.sh
           lab_apply_tier_context "${LAB_TIER}" "${GIT_BRANCH}"
           wait_collaboration_backend_smoke "${SERVICE}" 40
@@ -165,7 +140,7 @@ pipeline {
   }
 
   post {
-    success { echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} tier=${env.LAB_TIER} ACTION=${params.ACTION}" }
+    success { echo "OK ${env.JOB_NAME} #${env.BUILD_NUMBER} tier=${env.LAB_TIER}" }
     failure { echo 'Deployment failed — see Console Output.' }
   }
 }

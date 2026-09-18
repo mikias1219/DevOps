@@ -370,38 +370,38 @@ delete_job "pull-collaboration-now"
 delete_job "switch-watch-branch"
 delete_job "collaboration-stack"
 
-COLLAB_EXTRA_PARAMS='        <hudson.model.ChoiceParameterDefinition>
-          <name>LAB_TIER</name>
-          <description>test=develop, staging, production (overridden by GIT_BRANCH / webhook)</description>
-          <choices class="java.util.Arrays$ArrayList">
-            <a class="string-array">
-              <string>test</string>
-              <string>staging</string>
-              <string>production</string>
-            </a>
-          </choices>
-        </hudson.model.ChoiceParameterDefinition>
-        <hudson.model.StringParameterDefinition>
+# Optional GIT_BRANCH override (job name already encodes tier).
+COLLAB_EXTRA_PARAMS='        <hudson.model.StringParameterDefinition>
           <name>GIT_BRANCH</name>
-          <description>From GitHub webhook (develop|staging|production) or empty for manual tier</description>
+          <description>Optional override; default from job suffix (test=develop, staging, production)</description>
           <defaultValue></defaultValue>
           <trim>true</trim>
         </hudson.model.StringParameterDefinition>'
 
-sync_job "collaboration-backend" \
-  "$JOBS_DIR/Jenkinsfile.collaboration-backend" \
-  "Backend — test/staging/production tiers (same stages as backend/Jenkinsfile)" \
-  "$COLLAB_EXTRA_PARAMS"
+# Retire combined jobs — replaced by per-tier job names.
+delete_job "collaboration-backend"
+delete_job "collaboration-frontend"
+delete_job "collaboration-notification"
 
-sync_job "collaboration-frontend" \
-  "$JOBS_DIR/Jenkinsfile.collaboration-frontend" \
-  "Frontend — test/staging/production tiers (same stages as frontend/Jenkinsfile)" \
-  "$COLLAB_EXTRA_PARAMS"
-
-sync_job "collaboration-notification" \
-  "$JOBS_DIR/Jenkinsfile.collaboration-notification" \
-  "Notification — test/staging/production tiers (same stages as NES/Jenkinsfile)" \
-  "$COLLAB_EXTRA_PARAMS"
+for tier in test staging production; do
+  case "$tier" in
+    test) url_hint="http://SERVER/ (develop)" ;;
+    staging) url_hint="http://SERVER/staging/ (staging)" ;;
+    production) url_hint="http://SERVER/production/ (production)" ;;
+  esac
+  sync_job "collaboration-backend-${tier}" \
+    "$JOBS_DIR/Jenkinsfile.collaboration-backend" \
+    "Backend ${tier} — ${url_hint}. Same stages as backend/Jenkinsfile." \
+    "$COLLAB_EXTRA_PARAMS"
+  sync_job "collaboration-frontend-${tier}" \
+    "$JOBS_DIR/Jenkinsfile.collaboration-frontend" \
+    "Frontend ${tier} — ${url_hint}. Same stages as frontend/Jenkinsfile." \
+    "$COLLAB_EXTRA_PARAMS"
+  sync_job "collaboration-notification-${tier}" \
+    "$JOBS_DIR/Jenkinsfile.collaboration-notification" \
+    "Notification ${tier} — ${url_hint}. Same stages as NES/Jenkinsfile." \
+    "$COLLAB_EXTRA_PARAMS"
+done
 
 sync_choice_job "apply-vault-env" \
   "$JOBS_DIR/Jenkinsfile.apply-vault-env" \
@@ -416,15 +416,187 @@ sync_gwt_job "sync-devops-control-plane" \
 
 sync_gwt_job "github-push-collaboration" \
   "$JOBS_DIR/Jenkinsfile.github-push-collaboration" \
-  "GitHub webhook: push to develop on FE or BE repo starts that one Jenkins job." \
+  "GitHub webhook: develop→*-test, staging→*-staging, production→*-production." \
   "$SECRETS_DIR/github-webhook-collab-token.txt" \
   '$gh_ref' \
   'refs/heads/(develop|staging|production)'
 
+# ---------------------------------------------------------------------------
+# List views — All | Collab-test | Collab-Stage | Collab-Prod | Ops
+# ---------------------------------------------------------------------------
+
+delete_view() {
+  local view_name="$1"
+  local exists
+  refresh_crumb
+  exists="$(
+    curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -b "$COOKIE_JAR" \
+      "$JENKINS_URL/view/${view_name}/api/json"
+  )"
+  if [[ "$exists" != "200" ]]; then
+    echo "==> View ${view_name} not present — skip delete"
+    return 0
+  fi
+  echo "==> Deleting view ${view_name}"
+  curl -sS -o /dev/null "${CURL_AUTH[@]}" -b "$COOKIE_JAR" \
+    "${curl_crumb[@]}" -X POST "$JENKINS_URL/view/${view_name}/doDelete" >/dev/null || true
+}
+
+sync_list_view() {
+  local view_name="$1"
+  local description="$2"
+  shift 2
+  local jobs=("$@")
+  local out_xml="${OUT_DIR}/view-${view_name}.xml"
+  local job_xml=""
+  local j
+  for j in "${jobs[@]}"; do
+    job_xml+="    <string>${j}</string>"$'\n'
+  done
+
+  cat >"$out_xml" <<EOF
+<?xml version='1.1' encoding='UTF-8'?>
+<hudson.model.ListView>
+  <name>${view_name}</name>
+  <description>${description}</description>
+  <filterExecutors>false</filterExecutors>
+  <filterQueue>false</filterQueue>
+  <properties class="hudson.model.View\$PropertyList"/>
+  <jobNames>
+${job_xml}  </jobNames>
+  <jobFilters/>
+  <columns>
+    <hudson.views.StatusColumn/>
+    <hudson.views.WeatherColumn/>
+    <hudson.views.JobColumn/>
+    <hudson.views.LastSuccessColumn/>
+    <hudson.views.LastFailureColumn/>
+    <hudson.views.LastDurationColumn/>
+    <hudson.views.BuildButtonColumn/>
+  </columns>
+  <recurse>false</recurse>
+</hudson.model.ListView>
+EOF
+
+  refresh_crumb
+  local exists http_code encoded
+  encoded="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$view_name")"
+  exists="$(
+    curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -b "$COOKIE_JAR" \
+      "$JENKINS_URL/view/${encoded}/api/json"
+  )"
+  if [[ "$exists" == "200" ]]; then
+    echo "==> Updating view ${view_name}"
+    http_code="$(
+      curl -sS -o "${OUT_DIR}/post-view-${view_name}.out" -w '%{http_code}' \
+        "${CURL_AUTH[@]}" -b "$COOKIE_JAR" \
+        "${curl_crumb[@]}" \
+        -H "Content-Type: application/xml; charset=UTF-8" \
+        -X POST \
+        --data-binary @"$out_xml" \
+        "$JENKINS_URL/view/${encoded}/config.xml"
+    )"
+  else
+    echo "==> Creating view ${view_name}"
+    http_code="$(
+      curl -sS -o "${OUT_DIR}/post-view-${view_name}.out" -w '%{http_code}' \
+        "${CURL_AUTH[@]}" -b "$COOKIE_JAR" \
+        "${curl_crumb[@]}" \
+        -H "Content-Type: text/xml; charset=UTF-8" \
+        -X POST \
+        --data-binary @"$out_xml" \
+        "$JENKINS_URL/createView?name=${encoded}"
+    )"
+  fi
+  if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
+    echo "WARN: view ${view_name} sync HTTP ${http_code}" >&2
+    head -c 400 "${OUT_DIR}/post-view-${view_name}.out" >&2 || true
+    echo >&2
+  else
+    echo "    ${JENKINS_URL}/view/${encoded}/"
+  fi
+}
+
+echo "==> Removing old view names (if any)"
+delete_view "1-Test-develop"
+delete_view "2-Staging"
+delete_view "3-Production"
+delete_view "0-Ops-webhooks"
+delete_view "Test"
+delete_view "Staging"
+delete_view "Production"
+
+echo "==> Jenkins views: All | Collab-test | Collab-Stage | Collab-Prod | Ops"
+# Built-in "all" stays first as primary; ensure primaryView=all
+refresh_crumb
+curl -sS -o /dev/null "${CURL_AUTH[@]}" -b "$COOKIE_JAR" "${curl_crumb[@]}" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'script=
+def j = jenkins.model.Jenkins.instance
+def v = j.getView("all") ?: j.getView("All")
+if (v != null) { j.setPrimaryView(v); println("primaryView=" + v.name) }
+else { println("WARN: All view not found") }
+' \
+  "$JENKINS_URL/scriptText" || true
+
+sync_list_view "Collab-test" \
+  "TEST — develop. URLs: http://172.16.50.39/  /api/  /notification/" \
+  collaboration-backend-test \
+  collaboration-frontend-test \
+  collaboration-notification-test
+
+sync_list_view "Collab-Stage" \
+  "STAGING — staging branch. URLs: http://172.16.50.39/staging/" \
+  collaboration-backend-staging \
+  collaboration-frontend-staging \
+  collaboration-notification-staging
+
+sync_list_view "Collab-Prod" \
+  "PRODUCTION (lab) — production branch. URLs: http://172.16.50.39/production/" \
+  collaboration-backend-production \
+  collaboration-frontend-production \
+  collaboration-notification-production
+
+sync_list_view "Ops" \
+  "Control plane: GitHub webhook router, Vault export, DevOps sync" \
+  github-push-collaboration \
+  apply-vault-env \
+  sync-devops-control-plane
+
+# Tab order: All → Collab-test → Collab-Stage → Collab-Prod → Ops
+refresh_crumb
+curl -sS "${CURL_AUTH[@]}" -b "$COOKIE_JAR" "${curl_crumb[@]}" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode 'script=
+import jenkins.model.Jenkins
+def j = Jenkins.instance
+def names = ["all", "All", "Collab-test", "Collab-Stage", "Collab-Prod", "Ops"]
+def seen = [] as Set
+def ordered = []
+names.each { n ->
+  def v = j.getView(n)
+  if (v != null && !seen.contains(v.name)) { ordered.add(v); seen.add(v.name) }
+}
+j.views.each { v ->
+  if (!seen.contains(v.name)) { ordered.add(v); seen.add(v.name) }
+}
+j.setViews(ordered)
+def primary = j.getView("all") ?: j.getView("All") ?: ordered[0]
+if (primary != null) j.setPrimaryView(primary)
+j.save()
+println "views=" + j.views.collect { it.name }.join(",")
+println "primary=" + j.primaryView.name
+' \
+  "$JENKINS_URL/scriptText" || true
+
 rm -f "$COOKIE_JAR"
 echo
-echo "Done. Control-plane sync:"
-echo "  Open Jenkins → sync-devops-control-plane (or push DevOps main)"
+echo "Done. Open Jenkins views (All is built-in / primary):"
+echo "  ${JENKINS_URL}/                    ← All"
+echo "  ${JENKINS_URL}/view/Collab-test/"
+echo "  ${JENKINS_URL}/view/Collab-Stage/"
+echo "  ${JENKINS_URL}/view/Collab-Prod/"
+echo "  ${JENKINS_URL}/view/Ops/"
 echo "Webhook URLs (replace TOKEN from jenkins/secrets/*.txt):"
 echo "  .../generic-webhook-trigger/invoke?token=<devops-token>   → sync-devops-control-plane"
 echo "  .../generic-webhook-trigger/invoke?token=<collab-token>   → github-push-collaboration"

@@ -21,14 +21,16 @@ curl_args=()
 if [[ -n "$CRUMB_FIELD" && -n "$CRUMB_VALUE" ]]; then
   curl_args+=(-H "${CRUMB_FIELD}: ${CRUMB_VALUE}")
 fi
+param_args=(--data-urlencode "ACTION=${ACTION}" --data-urlencode "SKIP_TESTS=${SKIP_TESTS}")
+[[ -n "${LAB_TIER:-}" ]] && param_args+=(--data-urlencode "LAB_TIER=${LAB_TIER}")
+[[ -n "${GIT_BRANCH:-}" ]] && param_args+=(--data-urlencode "GIT_BRANCH=${GIT_BRANCH}")
 
-echo "==> Triggering ${JOB_NAME} (ACTION=${ACTION})"
+echo "==> Triggering ${JOB_NAME} (ACTION=${ACTION} LAB_TIER=${LAB_TIER:-} GIT_BRANCH=${GIT_BRANCH:-})"
 LOCATION="$(
   curl -sS -D - -o /dev/null -u "$AUTH" -b "$COOKIE_JAR" \
     "${curl_args[@]}" \
     -X POST \
-    --data-urlencode "ACTION=${ACTION}" \
-    --data-urlencode "SKIP_TESTS=${SKIP_TESTS}" \
+    "${param_args[@]}" \
     "$JENKINS_URL/job/${JOB_NAME}/buildWithParameters" \
     | awk 'BEGIN{IGNORECASE=1} /^Location:/ {print $2}' | tr -d '\r'
 )"

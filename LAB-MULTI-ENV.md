@@ -2,11 +2,13 @@
 
 One lab server (`172.16.50.39`) runs **three isolated stacks** that mirror company Jenkins branch rules:
 
-| Branch (GitHub) | Lab tier | Jenkins `LAB_TIER` | Public URLs (nginx :80) |
-|-----------------|----------|--------------------|-------------------------|
-| `develop` | **test** | `test` | `http://SERVER/` · `/api/` · `/notification/` |
-| `staging` | **staging** | `staging` | `http://SERVER/staging/` · `/staging/api/` · `/staging/notification/` |
-| `production` | **production** | `production` | `http://SERVER/production/` · `/production/api/` · `/production/notification/` |
+| Branch (GitHub) | Lab tier | Jenkins jobs | Public URLs |
+|-----------------|----------|--------------|-------------|
+| `develop` | **test** | `collaboration-{backend,frontend,notification}-test` | `http://SERVER/` · `/api/` · `/notification/` |
+| `staging` | **staging** | `…-staging` | `http://SERVER/staging/…` |
+| `production` | **production** | `…-production` | `http://SERVER/production/…` |
+
+Webhook router `github-push-collaboration` starts the matching **named** job (no shared `LAB_TIER` param).
 
 ## Jenkins (same stage names as app `Jenkinsfile`s)
 

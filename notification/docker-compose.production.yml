@@ -34,6 +34,15 @@ services:
       APP_PORT: "8006"
       DB_HOST: db
       DB_PORT: "5432"
+      DB_USER: ${NOTIFICATION_DB_USER:-postgres}
+      DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-nes_prod_secret}
+      DB_NAME: ${NOTIFICATION_DB_NAME:-selamnew-notification-production}
+      DB_TYPE: postgres
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${NOTIFICATION_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-nes_prod_secret}
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME:-selamnew-notification-production}
       FILE_SERVER_URL: ${LAB_PUBLIC_BASE:-http://172.16.50.39/production}
       PRODUCT: ${PRODUCT:-COLLAB}
       SOURCE_SERVICE: ${SOURCE_SERVICE:-collaboration}

@@ -99,6 +99,13 @@ lab_tier_source_root() {
       fi
     done
   fi
+  # test/develop: prefer legacy root checkout if present (working lab), else environments/test
+  if [ "$_t" = test ]; then
+    if [ -d "${_base}/backend/.git" ] || [ -f "${_base}/backend/package.json" ]; then
+      printf '%s' "$_base"
+      return 0
+    fi
+  fi
   printf '%s/environments/%s' "$_base" "$_t"
 }
 

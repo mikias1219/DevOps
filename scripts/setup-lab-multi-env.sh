@@ -84,6 +84,10 @@ EOF
     fi
     _nex="$ROOT/notification/.env.docker.${tier}.example"
     _nout="$ROOT/notification/.env.docker.${tier}"
+    if [ "$tier" = test ]; then
+      _nex="$ROOT/notification/.env.docker.example"
+      _nout="$ROOT/notification/.env.docker"
+    fi
     if [ ! -f "$_nout" ] && [ -f "$_nex" ]; then
       cp "$_nex" "$_nout"
       sed -i "s|172.16.50.39|${SERVER_IP}|g" "$_nout"

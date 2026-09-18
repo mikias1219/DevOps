@@ -1,4 +1,4 @@
-// Lab — same stage names as Notification-and-email-service/Jenkinsfile (production).
+// Lab NES — job name selects tier: collaboration-notification-{test|staging|production}
 
 pipeline {
   agent any
@@ -19,30 +19,23 @@ pipeline {
     stage('Select Environment') {
       steps {
         script {
-          def branch = (params.GIT_BRANCH ?: '').trim()
-          if (!branch && env.gh_ref) {
-            branch = env.gh_ref.replace('refs/heads/', '')
+          def jn = env.JOB_NAME ?: ''
+          def tier = 'test'
+          def branch = 'develop'
+          if (jn.endsWith('-production') || jn.contains('-production')) {
+            tier = 'production'; branch = 'production'
+          } else if (jn.endsWith('-staging') || jn.contains('-staging')) {
+            tier = 'staging'; branch = 'staging'
           }
-          if (!branch) {
-            switch (params.LAB_TIER) {
-              case 'staging': branch = 'staging'; break
-              case 'production': branch = 'production'; break
-              default: branch = 'develop'; break
-            }
-          }
-          def tier = params.LAB_TIER ?: 'test'
-          if (branch.contains('production')) {
-            tier = 'production'
-          } else if (branch.contains('staging')) {
-            tier = 'staging'
-          } else {
-            tier = 'test'
+          if (params.GIT_BRANCH?.trim()) {
+            branch = params.GIT_BRANCH.trim()
           }
           env.LAB_TIER = tier
           env.GIT_BRANCH = branch
           env.REMOTE_SERVER = 'ienetworks@172.16.50.39'
           env.SECRETS_PATH = "/var/devops/collaboration/lab-secrets/${tier}/.collab-nes-env"
-          echo "GIT_BRANCH=${branch} → LAB_TIER=${tier}"
+          echo "JOB=${jn} → LAB_TIER=${tier} GIT_BRANCH=${branch}"
+          echo "URLs: " + (tier == 'test' ? 'http://172.16.50.39/notification/' : "http://172.16.50.39/${tier}/notification/")
           echo "ACTION=${params.ACTION}"
         }
       }

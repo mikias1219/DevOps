@@ -21,7 +21,7 @@ grep -q 'remove_existing_migrations_backend' "$ROOT/jenkins/lib/docker-lib.sh" &
 grep -q 'select_environment_lab_backend' "$ROOT/jenkins/lib/docker-lib.sh" && ok "select_environment_lab_*" || bad "lab env helpers missing"
 
 echo
-echo "2. Jenkins jobs (expect 6)"
+echo "2. Jenkins jobs (router + 9 tier jobs + vault + sync)"
 if curl -sf http://127.0.0.1:8080/login >/dev/null 2>&1; then
   JAUTH=()
   if [ -f "$ROOT/jenkins/secrets/admin.env" ]; then
@@ -31,8 +31,10 @@ if curl -sf http://127.0.0.1:8080/login >/dev/null 2>&1; then
     set +a
     JAUTH=(-u "${JENKINS_ADMIN_USER}:${JENKINS_ADMIN_PASS}")
   fi
-  for j in github-push-collaboration collaboration-backend collaboration-frontend \
-    collaboration-notification apply-vault-env sync-devops-control-plane; do
+  for j in github-push-collaboration apply-vault-env sync-devops-control-plane \
+    collaboration-backend-test collaboration-frontend-test collaboration-notification-test \
+    collaboration-backend-staging collaboration-frontend-staging collaboration-notification-staging \
+    collaboration-backend-production collaboration-frontend-production collaboration-notification-production; do
     code=$(curl -s "${JAUTH[@]}" -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/job/${j}/api/json" 2>/dev/null || echo 000)
     [ "$code" = "200" ] && ok "job ${j}" || bad "job ${j} (HTTP ${code})"
   done
