@@ -518,27 +518,13 @@ EOF
 }
 
 echo "==> Removing old view names (if any)"
-delete_view "1-Test-develop"
-delete_view "2-Staging"
-delete_view "3-Production"
-delete_view "0-Ops-webhooks"
-delete_view "Test"
-delete_view "Staging"
-delete_view "Production"
+for _old in 1-Test-develop 2-Staging 3-Production 0-Ops-webhooks \
+  Collab-test Collab-Stage Collab-Prod Ops Test Staging Production; do
+  delete_view "$_old"
+done
 
 echo "==> Jenkins views: All | Collab-test | Collab-Stage | Collab-Prod | Ops"
-# Built-in "all" stays first as primary; ensure primaryView=all
-refresh_crumb
-curl -sS -o /dev/null "${CURL_AUTH[@]}" -b "$COOKIE_JAR" "${curl_crumb[@]}" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode 'script=
-def j = jenkins.model.Jenkins.instance
-def v = j.getView("all") ?: j.getView("All")
-if (v != null) { j.setPrimaryView(v); println("primaryView=" + v.name) }
-else { println("WARN: All view not found") }
-' \
-  "$JENKINS_URL/scriptText" || true
-
+# Recreate in this order (All is built-in and stays primary).
 sync_list_view "Collab-test" \
   "TEST — develop. URLs: http://172.16.50.39/  /api/  /notification/" \
   collaboration-backend-test \
@@ -563,40 +549,26 @@ sync_list_view "Ops" \
   apply-vault-env \
   sync-devops-control-plane
 
-# Tab order: All → Collab-test → Collab-Stage → Collab-Prod → Ops
+# Ensure All is the landing / primary view
 refresh_crumb
 curl -sS "${CURL_AUTH[@]}" -b "$COOKIE_JAR" "${curl_crumb[@]}" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode 'script=
 import jenkins.model.Jenkins
-def j = Jenkins.instance
-def names = ["all", "All", "Collab-test", "Collab-Stage", "Collab-Prod", "Ops"]
-def seen = [] as Set
-def ordered = []
-names.each { n ->
-  def v = j.getView(n)
-  if (v != null && !seen.contains(v.name)) { ordered.add(v); seen.add(v.name) }
-}
-j.views.each { v ->
-  if (!seen.contains(v.name)) { ordered.add(v); seen.add(v.name) }
-}
-j.setViews(ordered)
-def primary = j.getView("all") ?: j.getView("All") ?: ordered[0]
-if (primary != null) j.setPrimaryView(primary)
-j.save()
-println "views=" + j.views.collect { it.name }.join(",")
-println "primary=" + j.primaryView.name
+def j = Jenkins.get()
+def primary = j.getView("all")
+if (primary != null) { j.setPrimaryView(primary); j.save(); println("primary=" + primary.viewName) }
 ' \
   "$JENKINS_URL/scriptText" || true
 
 rm -f "$COOKIE_JAR"
 echo
-echo "Done. Open Jenkins views (All is built-in / primary):"
-echo "  ${JENKINS_URL}/                    ← All"
-echo "  ${JENKINS_URL}/view/Collab-test/"
-echo "  ${JENKINS_URL}/view/Collab-Stage/"
-echo "  ${JENKINS_URL}/view/Collab-Prod/"
-echo "  ${JENKINS_URL}/view/Ops/"
+echo "Done. Views:"
+echo "  All (primary)  ${JENKINS_URL}/"
+echo "  Collab-test    ${JENKINS_URL}/view/Collab-test/"
+echo "  Collab-Stage   ${JENKINS_URL}/view/Collab-Stage/"
+echo "  Collab-Prod    ${JENKINS_URL}/view/Collab-Prod/"
+echo "  Ops            ${JENKINS_URL}/view/Ops/"
 echo "Webhook URLs (replace TOKEN from jenkins/secrets/*.txt):"
 echo "  .../generic-webhook-trigger/invoke?token=<devops-token>   → sync-devops-control-plane"
 echo "  .../generic-webhook-trigger/invoke?token=<collab-token>   → github-push-collaboration"
