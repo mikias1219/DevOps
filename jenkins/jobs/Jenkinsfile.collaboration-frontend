@@ -1,3 +1,7 @@
+// Lab pipeline — same stage names as frontend/Jenkinsfile (production core deploy stages).
+// Production: IE Jenkins → SSH → Docker Hub → Swarm (+ optional core-* sync stages).
+// Lab: docker-lib.sh → registry → Compose. See LAB-PRODUCTION-PARITY.md.
+
 pipeline {
   agent any
 
@@ -22,7 +26,7 @@ pipeline {
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
           echo "ACTION=${ACTION}"
-          print_environment
+          select_environment_lab_frontend
         '''
       }
     }
@@ -32,12 +36,7 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
-          SOURCE="$(collaboration_source)"
-          echo "SOURCE=${SOURCE}"
-          echo "BRANCH=$(frontend_branch)"
-          echo "DOCKERFILE=${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile"
-          echo "IMAGE=$(registry_host)/collaboration-frontend"
-          test -d "${SOURCE}/frontend" || { echo "Missing frontend source at ${SOURCE}/frontend" >&2; exit 1; }
+          fetch_application_variables_frontend
         '''
       }
     }
@@ -48,7 +47,7 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
-          ensure_local_registry
+          prepare_repository_lab_frontend
         '''
       }
     }

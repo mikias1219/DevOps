@@ -12,6 +12,10 @@ This folder is the **control plane**. App source lives next to it; DevOps does *
 **Lab host:** `172.16.50.39` (`ienetworks`)  
 **Idea:** same pipeline *shape* as production Jenkinsfiles, but images go to a **local registry** and deploy with **Compose** on one VM (not Docker Hub + Swarm).
 
+**Production parity (read this first):** [`LAB-PRODUCTION-PARITY.md`](LAB-PRODUCTION-PARITY.md) — same **stage names** as `backend/Jenkinsfile` / `frontend/Jenkinsfile` / NES `Jenkinsfile`, without changing company Jenkins or app repos.
+
+**Intern final checklist:** [`INTERN-LAB-FINAL.md`](INTERN-LAB-FINAL.md) — one-time `finalize-lab-staging-parity.sh` + `verify-lab-staging-parity.sh`.
+
 Jenkins never runs Nest/Next itself. It drives **host Docker** through `/var/run/docker.sock`, using `jenkins/lib/docker-lib.sh`.
 
 ---

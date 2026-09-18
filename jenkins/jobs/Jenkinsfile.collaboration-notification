@@ -1,3 +1,7 @@
+// Lab pipeline — same stage names as Notification-and-email-service/Jenkinsfile (production).
+// Production: IE Jenkins → SSH → Docker Hub → Swarm. Lab: docker-lib.sh → registry → Compose.
+// See LAB-PRODUCTION-PARITY.md.
+
 pipeline {
   agent any
 
@@ -22,7 +26,7 @@ pipeline {
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
           echo "ACTION=${ACTION}"
-          print_notification_environment
+          select_environment_lab_notification
         '''
       }
     }
@@ -32,12 +36,7 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
-          SOURCE="$(notification_source)"
-          echo "SOURCE=${SOURCE}"
-          echo "BRANCH=$(notification_branch)"
-          echo "DOCKERFILE=${DEVOPS_ROOT}/notification/docker/notification.Dockerfile"
-          echo "IMAGE=$(registry_host)/collaboration-notification"
-          test -d "${SOURCE}" || { echo "Missing notification source at ${SOURCE}" >&2; exit 1; }
+          fetch_application_variables_notification
         '''
       }
     }
@@ -48,8 +47,7 @@ pipeline {
         sh '''#!/usr/bin/env bash
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
-          ensure_local_registry
-          ensure_notification_infra
+          prepare_repository_lab_notification
         '''
       }
     }
@@ -61,6 +59,17 @@ pipeline {
           set -euo pipefail
           . /var/devops/jenkins/lib/docker-lib.sh
           git_pull_repo "$(notification_source)" "$(notification_branch)"
+        '''
+      }
+    }
+
+    stage('Remove existing migrations') {
+      when { expression { return !['start', 'stop', 'restart', 'recreate'].contains(env.ACTION) } }
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          . /var/devops/jenkins/lib/docker-lib.sh
+          remove_existing_migrations_notification
         '''
       }
     }

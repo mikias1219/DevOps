@@ -85,7 +85,7 @@ services:
     command: ["node", "dist/main"]
     environment:
       APP_PORT: "5000"
-      APP_PUBLIC_BASE_URL: http://172.16.50.39:5000
+      APP_PUBLIC_BASE_URL: http://172.16.50.39
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-selamnew-collab}
@@ -95,7 +95,7 @@ services:
       ELASTICSEARCH_NODE: http://elasticsearch:9200
       ELASTICSEARCH_USERNAME: ""
       ELASTICSEARCH_PASSWORD: ""
-      COLLABORATION_FRONT_URL: http://172.16.50.39:3000
+      COLLABORATION_FRONT_URL: http://172.16.50.39
     ports:
       - "${BACKEND_HOST_PORT:-5000}:5000"
     healthcheck:

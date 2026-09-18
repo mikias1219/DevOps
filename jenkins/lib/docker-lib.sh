@@ -133,6 +133,119 @@ print_environment() {
 }
 
 # ---------------------------------------------------------------------------
+# Lab ↔ production Jenkinsfile parity (same stage names; see LAB-PRODUCTION-PARITY.md)
+# Production runs SSH + Docker Hub + Swarm. Lab runs on this host + registry + Compose.
+# ---------------------------------------------------------------------------
+
+LAB_SERVER_IP="${LAB_SERVER_IP:-172.16.50.39}"
+
+_select_environment_lab_common() {
+  _branch="$1"
+  echo "==> Select Environment (lab: develop → test host, same as prod develop → REMOTE_SERVER_TEST / staging practice)"
+  echo "GIT_BRANCH=${_branch}"
+  echo "REMOTE_SERVER=${LAB_SERVER_IP}  # prod: SSH target from Jenkins credentials"
+  echo "DEPLOY_MODE=compose  # prod: docker service update / stack deploy"
+  echo "IMAGE_REGISTRY=$(registry_host)  # prod: Docker Hub (DOCKERHUB_REPO)"
+}
+
+select_environment_lab_backend() {
+  _select_environment_lab_common "$(backend_branch)"
+  print_environment
+}
+
+select_environment_lab_frontend() {
+  _select_environment_lab_common "$(frontend_branch)"
+  print_environment
+}
+
+select_environment_lab_notification() {
+  _select_environment_lab_common "$(notification_branch)"
+  print_notification_environment
+}
+
+_fetch_application_variables_common() {
+  _repo_dir="$1"
+  _branch="$2"
+  _image_ref="$3"
+  _service_name="$4"
+  _repo_url="$(git -C "$_repo_dir" remote get-url origin 2>/dev/null || echo unknown)"
+  echo "REPO_URL=${_repo_url}"
+  echo "REPO_DIR=${_repo_dir}"
+  echo "BRANCH_NAME=${_branch}"
+  echo "DOCKERHUB_REPO=${_image_ref}"
+  echo "SERVICE_NAME=${_service_name}"
+}
+
+fetch_application_variables_backend() {
+  _src="$(collaboration_source)/backend"
+  echo "==> Fetch Application Variables (prod: grep secrets file over SSH)"
+  _fetch_application_variables_common "$_src" "$(backend_branch)" \
+    "$(registry_host)/collaboration-backend" "backend"
+  echo "DOCKERFILE=${DEVOPS_ROOT}/collaboration/docker/backend.Dockerfile"
+  test -d "$_src" || { echo "Missing backend source at ${_src}" >&2; return 1; }
+}
+
+fetch_application_variables_frontend() {
+  _src="$(collaboration_source)/frontend"
+  echo "==> Fetch Application Variables (prod: grep secrets file over SSH)"
+  _fetch_application_variables_common "$_src" "$(frontend_branch)" \
+    "$(registry_host)/collaboration-frontend" "frontend"
+  echo "DOCKERFILE=${DEVOPS_ROOT}/collaboration/docker/frontend.Dockerfile"
+  _fe_env="${DEVOPS_ROOT}/collaboration/env/frontend.env"
+  echo "VAULT_ADDR=$(env_file_get "$_fe_env" VAULT_ADDR 'http://127.0.0.1:8200')"
+  echo "VAULT_SECRET_PATH=$(env_file_get "$_fe_env" VAULT_SECRET_PATH 'secret/collaboration/frontend')"
+  echo "    (lab: NEXT_PUBLIC_* from frontend.env at build; prod: Vault build-args on remote)"
+  test -d "$_src" || { echo "Missing frontend source at ${_src}" >&2; return 1; }
+}
+
+fetch_application_variables_notification() {
+  _src="$(notification_source)"
+  echo "==> Fetch Application Variables (prod: grep secrets file over SSH)"
+  _fetch_application_variables_common "$_src" "$(notification_branch)" \
+    "$(registry_host)/collaboration-notification" "notification"
+  echo "DOCKERFILE=${DEVOPS_ROOT}/notification/docker/notification.Dockerfile"
+  test -d "$_src" || { echo "Missing notification source at ${_src}" >&2; return 1; }
+}
+
+prepare_repository_lab_backend() {
+  echo "==> Prepare Repository (prod: ssh chown/chmod REPO_DIR on REMOTE_SERVER)"
+  ensure_local_registry
+  ensure_collaboration_infra
+  test -r "$(collaboration_source)/backend/package.json"
+}
+
+prepare_repository_lab_frontend() {
+  echo "==> Prepare Repository (prod: ssh chown/chmod REPO_DIR on REMOTE_SERVER)"
+  ensure_local_registry
+  test -r "$(collaboration_source)/frontend/package.json"
+}
+
+prepare_repository_lab_notification() {
+  echo "==> Prepare Repository (prod: ssh chown/chmod REPO_DIR on REMOTE_SERVER)"
+  ensure_local_registry
+  ensure_notification_infra
+  test -r "$(notification_source)/package.json"
+}
+
+_remove_migrations_in_dir() {
+  _dir="$1"
+  if [ ! -d "$_dir" ]; then
+    echo "==> Remove existing migrations: ${_dir} not found — skip"
+    return 0
+  fi
+  echo "==> Remove existing migrations (prod Jenkinsfile stage): ${_dir}"
+  find "$_dir" -maxdepth 1 -type f -print -delete 2>/dev/null || rm -f "$_dir"/* 2>/dev/null || true
+}
+
+remove_existing_migrations_backend() {
+  _remove_migrations_in_dir "$(collaboration_source)/backend/src/app/migrations"
+}
+
+remove_existing_migrations_notification() {
+  _remove_migrations_in_dir "$(notification_source)/src/app/migrations"
+}
+
+# ---------------------------------------------------------------------------
 # Git
 # ---------------------------------------------------------------------------
 
@@ -159,9 +272,18 @@ git_pull_repo() {
   git -C "$_dir" fetch "$_ssh_url" "+refs/heads/${_branch}:refs/remotes/origin/${_branch}"
   _current="$(git -C "$_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [ "$_current" != "$_branch" ]; then
-    git -C "$_dir" checkout "$_branch"
+    git -C "$_dir" checkout -f "$_branch"
   fi
-  git -C "$_dir" merge --ff-only "origin/${_branch}"
+  # Lab deploy tree: GitHub is source of truth. Discard local edits so merge
+  # cannot abort on dirty package.json / lockfiles left by prior builds.
+  _dirty="$(git -C "$_dir" status --porcelain --untracked-files=no 2>/dev/null || true)"
+  if [ -n "$_dirty" ]; then
+    echo "==> discarding local changes before pull:"
+    echo "$_dirty" | sed 's/^/    /'
+    git -C "$_dir" reset --hard "HEAD"
+    git -C "$_dir" clean -fd
+  fi
+  git -C "$_dir" reset --hard "origin/${_branch}"
   echo "==> HEAD $(git -C "$_dir" log -1 --oneline)"
 }
 
@@ -361,12 +483,12 @@ build_and_push_collaboration_frontend() {
   _sha="$(_git_sha "$_src")"
   _branch="$(_git_branch_name "$_src")"
   _image="${_reg}/collaboration-frontend"
-  _api_v1="$(_frontend_public_arg NEXT_PUBLIC_COLLABORATION_URL http://172.16.50.39:5000/api/v1)"
-  _ws="$(_frontend_public_arg NEXT_PUBLIC_WS_URL http://172.16.50.39:5000)"
-  _api="$(_frontend_public_arg NEXT_PUBLIC_API_URL http://172.16.50.39:5000/api/v1)"
-  _api_base="$(_frontend_public_arg NEXT_PUBLIC_API_BASE_URL http://172.16.50.39:5000/api/v1)"
-  _sock="$(_frontend_public_arg NEXT_PUBLIC_COLLABORATION_SOCKET_URL http://172.16.50.39:5000)"
-  _app="$(_frontend_public_arg NEXT_PUBLIC_APP_URL http://172.16.50.39:3000)"
+  _api_v1="$(_frontend_public_arg NEXT_PUBLIC_COLLABORATION_URL http://172.16.50.39/api/v1)"
+  _ws="$(_frontend_public_arg NEXT_PUBLIC_WS_URL http://172.16.50.39)"
+  _api="$(_frontend_public_arg NEXT_PUBLIC_API_URL http://172.16.50.39/api/v1)"
+  _api_base="$(_frontend_public_arg NEXT_PUBLIC_API_BASE_URL http://172.16.50.39/api/v1)"
+  _sock="$(_frontend_public_arg NEXT_PUBLIC_COLLABORATION_SOCKET_URL http://172.16.50.39)"
+  _app="$(_frontend_public_arg NEXT_PUBLIC_APP_URL http://172.16.50.39)"
   _fb_key="$(_frontend_public_arg NEXT_PUBLIC_API_KEY "")"
   _fb_domain="$(_frontend_public_arg NEXT_PUBLIC_AUTH_DOMAIN "")"
   _fb_project="$(_frontend_public_arg NEXT_PUBLIC_PROJECT_ID "")"

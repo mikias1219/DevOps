@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1
 # Lab notification — FROM prebuilt lab-node (no apt). Fast after warm-lab-base.sh.
+# No `# syntax=docker/dockerfile:1` — avoids Docker Hub TLS timeouts on the lab.
 ARG LAB_NODE=127.0.0.1:5001/lab-node:20
 FROM ${LAB_NODE} AS deps
 WORKDIR /app
